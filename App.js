@@ -340,6 +340,13 @@ const INITIAL_PROFILES_RAW = [
     return str.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n) && n >= 1);
   }
 
+    function getCleanTaskName() {
+    const raw = (document.getElementById('taskName')?.value || 'KARCAS_MK2_V24').trim();
+    const cleaned = raw.replace(/[^A-Za-z0-9_-]/g, '_').replace(/_+/g, '_');
+    return cleaned || 'KARCAS_MK2_V24';
+  }
+
+
   function updateModel() {
     const spansX = parseNumberList(document.getElementById('spansX').value, [6]);
     const stepsY = parseNumberList(document.getElementById('stepsY').value, [6]);
@@ -355,7 +362,11 @@ const INITIAL_PROFILES_RAW = [
     const trussSlope = parseFloat(document.getElementById('trussSlope').value) || 0;
     let trussPanels = parseInt(document.getElementById('trussPanels').value) || 4;
     if (trussPanels % 2 !== 0) trussPanels++;
+
     const trussType = document.getElementById('trussType').value;
+    const hingeWeb = document.getElementById('hingeWeb')?.checked ?? true;
+    const hingeBrace = document.getElementById('hingeBrace')?.checked ?? true;
+    const hingeTrussSupport = document.getElementById('hingeTrussSupport')?.checked ?? false;
 
     const braceBaysY = parseIntList(document.getElementById('braceBaysY').value);
     const hasVertBraces = document.getElementById('hasVertBraces').checked;
@@ -409,9 +420,6 @@ const INITIAL_PROFILES_RAW = [
     columnTiers.forEach(t => zLevels.push(zLevels[zLevels.length - 1] + t.h));
     const H = zLevels[zLevels.length - 1];
 
-
-
-
     // 1. Колонны по ярусам и опоры
     for (let j = 0; j < yCoords.length; j++) {
       const y = yCoords[j];
@@ -424,7 +432,7 @@ const INITIAL_PROFILES_RAW = [
           const n1 = getOrCreateNode(x, y, zLevels[tIdx]);
           const n2 = getOrCreateNode(x, y, zLevels[tIdx + 1]);
           const secId = secNameToId[columnTiers[tIdx].sec];
-          elements.push({ id: elements.length + 1, n1, n2, sec: secId, group: 'col', hinge: false, angle: colAngle });
+          elements.push({ id: elements.length + 1, n1, n2, sec: secId, group: 'col', hingeStart: false, hingeEnd: false, angle: colAngle });
         }
       }
     }
@@ -437,7 +445,7 @@ const INITIAL_PROFILES_RAW = [
         for (let j = 0; j < yCoords.length - 1; j++) {
           const n1 = getOrCreateNode(x, yCoords[j], H);
           const n2 = getOrCreateNode(x, yCoords[j + 1], H);
-          elements.push({ id: elements.length + 1, n1, n2, sec: tieSecId, group: 'tie', hinge: true, angle: 0 });
+          elements.push({ id: elements.length + 1, n1, n2, sec: tieSecId, group: 'tie', hingeStart: hingeBrace, hingeEnd: hingeBrace, angle: 0 });
         }
       }
     }
@@ -467,29 +475,34 @@ const INITIAL_PROFILES_RAW = [
             topNodes.push(getOrCreateNode(px, y, pzTop));
           }
 
+          // Пояса фермы (учет шарнирного опирания на опорах p=0 и p=trussPanels-1)
           for (let p = 0; p < trussPanels; p++) {
-            elements.push({ id: elements.length + 1, n1: botNodes[p], n2: botNodes[p+1], sec: chordSecId, group: 'chord', hinge: false, angle: 0 });
-            elements.push({ id: elements.length + 1, n1: topNodes[p], n2: topNodes[p+1], sec: chordSecId, group: 'chord', hinge: false, angle: 0 });
+            const hStart = hingeTrussSupport && p === 0;
+            const hEnd = hingeTrussSupport && p === trussPanels - 1;
+            elements.push({ id: elements.length + 1, n1: botNodes[p], n2: botNodes[p+1], sec: chordSecId, group: 'chord', hingeStart: hStart, hingeEnd: hEnd, angle: 0 });
+            elements.push({ id: elements.length + 1, n1: topNodes[p], n2: topNodes[p+1], sec: chordSecId, group: 'chord', hingeStart: hStart, hingeEnd: hEnd, angle: 0 });
           }
 
+          // Стойки фермы
           for (let p = 0; p <= trussPanels; p++) {
             if (trussType === 'pratt' || p === 0 || p === trussPanels || p === halfPanels) {
-              elements.push({ id: elements.length + 1, n1: botNodes[p], n2: topNodes[p], sec: webSecId, group: 'web', hinge: true, angle: 0 });
+              elements.push({ id: elements.length + 1, n1: botNodes[p], n2: topNodes[p], sec: webSecId, group: 'web', hingeStart: hingeWeb, hingeEnd: hingeWeb, angle: 0 });
             }
           }
 
+          // Раскосы фермы
           for (let p = 0; p < trussPanels; p++) {
             if (trussType === 'pratt') {
               if (p < halfPanels) {
-                elements.push({ id: elements.length + 1, n1: topNodes[p], n2: botNodes[p+1], sec: webSecId, group: 'web', hinge: true, angle: 0 });
+                elements.push({ id: elements.length + 1, n1: topNodes[p], n2: botNodes[p+1], sec: webSecId, group: 'web', hingeStart: hingeWeb, hingeEnd: hingeWeb, angle: 0 });
               } else {
-                elements.push({ id: elements.length + 1, n1: botNodes[p], n2: topNodes[p+1], sec: webSecId, group: 'web', hinge: true, angle: 0 });
+                elements.push({ id: elements.length + 1, n1: botNodes[p], n2: topNodes[p+1], sec: webSecId, group: 'web', hingeStart: hingeWeb, hingeEnd: hingeWeb, angle: 0 });
               }
             } else {
               if (p % 2 === 0) {
-                elements.push({ id: elements.length + 1, n1: botNodes[p], n2: topNodes[p+1], sec: webSecId, group: 'web', hinge: true, angle: 0 });
+                elements.push({ id: elements.length + 1, n1: botNodes[p], n2: topNodes[p+1], sec: webSecId, group: 'web', hingeStart: hingeWeb, hingeEnd: hingeWeb, angle: 0 });
               } else {
-                elements.push({ id: elements.length + 1, n1: topNodes[p], n2: botNodes[p+1], sec: webSecId, group: 'web', hinge: true, angle: 0 });
+                elements.push({ id: elements.length + 1, n1: topNodes[p], n2: botNodes[p+1], sec: webSecId, group: 'web', hingeStart: hingeWeb, hingeEnd: hingeWeb, angle: 0 });
               }
             }
           }
@@ -515,8 +528,8 @@ const INITIAL_PROFILES_RAW = [
             const n12 = getOrCreateNode(x, y1, zTop);
             const n21 = getOrCreateNode(x, y2, zBot);
             const n22 = getOrCreateNode(x, y2, zTop);
-            elements.push({ id: elements.length + 1, n1: n11, n2: n22, sec: braceSecId, group: 'brace', hinge: true, angle: 0 });
-            elements.push({ id: elements.length + 1, n1: n21, n2: n12, sec: braceSecId, group: 'brace', hinge: true, angle: 0 });
+            elements.push({ id: elements.length + 1, n1: n11, n2: n22, sec: braceSecId, group: 'brace', hingeStart: hingeBrace, hingeEnd: hingeBrace, angle: 0 });
+            elements.push({ id: elements.length + 1, n1: n21, n2: n12, sec: braceSecId, group: 'brace', hingeStart: hingeBrace, hingeEnd: hingeBrace, angle: 0 });
           }
         }
       }
@@ -529,11 +542,12 @@ const INITIAL_PROFILES_RAW = [
           const n21 = getOrCreateNode(x2, y1, H);
           const n12 = getOrCreateNode(x1, y2, H);
           const n22 = getOrCreateNode(x2, y2, H);
-          elements.push({ id: elements.length + 1, n1: n11, n2: n22, sec: braceSecId, group: 'brace', hinge: true, angle: 0 });
-          elements.push({ id: elements.length + 1, n1: n21, n2: n12, sec: braceSecId, group: 'brace', hinge: true, angle: 0 });
+          elements.push({ id: elements.length + 1, n1: n11, n2: n22, sec: braceSecId, group: 'brace', hingeStart: hingeBrace, hingeEnd: hingeBrace, angle: 0 });
+          elements.push({ id: elements.length + 1, n1: n21, n2: n12, sec: braceSecId, group: 'brace', hingeStart: hingeBrace, hingeEnd: hingeBrace, angle: 0 });
         }
       }
     });
+
 
     model = { nodes, elements, supports, activeSections };
     document.getElementById('stats').textContent = `Узлов: ${nodes.length} | Элементов: ${elements.length} | Профилей в схеме: ${activeSections.length}`;
@@ -541,9 +555,11 @@ const INITIAL_PROFILES_RAW = [
     generateLiraText();
     draw();
   }
-  function generateLiraText() {
+  
+    function generateLiraText() {
+    const taskName = getCleanTaskName();
     let lines = [];
-    lines.push("( 0/ 1; KARCAS_MK2_V2.3_LIRA2024/ 2; 5/");
+    lines.push(`( 0/ 1; ${taskName}/ 2; 5/`);
     lines.push("28; 0 0 1  1 0 0  0 1 0; /");
     lines.push("33;M 1 CM 100 T 1 C 1 /");
     lines.push("39;");
@@ -562,6 +578,19 @@ const INITIAL_PROFILES_RAW = [
       lines.push(`10 ${el.sec} ${el.n1} ${el.n2} /`);
     });
     lines.push(")");
+
+    // Блок ( 2/ ) — Шарниры на концах стержней (освобождение UY=5, UZ=6)
+    const hingedElems = model.elements.filter(el => el.hingeStart || el.hingeEnd);
+    if (hingedElems.length > 0) {
+      lines.push("( 2/");
+      hingedElems.forEach(el => {
+        let parts = [];
+        if (el.hingeStart) parts.push(`${el.id} 1 5 0/`, `${el.id} 1 6 0/`);
+        if (el.hingeEnd) parts.push(`${el.id} 2 5 0/`, `${el.id} 2 6 0/`);
+        lines.push(parts.join(''));
+      });
+      lines.push(")");
+    }
 
     lines.push("( 3/");
     model.activeSections.forEach(sec => {
@@ -604,7 +633,6 @@ const INITIAL_PROFILES_RAW = [
 
     document.getElementById('liraOutput').value = lines.join('\n');
   }
-
 
 
   // === 5. 3D ВИЗУАЛИЗАЦИЯ НА CANVAS ===
@@ -702,6 +730,29 @@ const INITIAL_PROFILES_RAW = [
         ctx.font = '10px sans-serif';
         ctx.fillText(el.id, (p1.sx + p2.sx) / 2, (p1.sy + p2.sy) / 2);
       }
+            // Визуализация шарниров на 3D-схеме
+      if (el.hingeStart || el.hingeEnd) {
+        ctx.fillStyle = '#ffffff';
+        ctx.strokeStyle = '#222222';
+        ctx.lineWidth = 1;
+        if (el.hingeStart) {
+          const hx = p1.sx + (p2.sx - p1.sx) * 0.12;
+          const hy = p1.sy + (p2.sy - p1.sy) * 0.12;
+          ctx.beginPath();
+          ctx.arc(hx, hy, 2.2, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
+        if (el.hingeEnd) {
+          const hx = p2.sx + (p1.sx - p2.sx) * 0.12;
+          const hy = p2.sy + (p1.sy - p2.sy) * 0.12;
+          ctx.beginPath();
+          ctx.arc(hx, hy, 2.2, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
+      }
+
     });
 
     model.supports.forEach(s => {
@@ -763,7 +814,7 @@ const INITIAL_PROFILES_RAW = [
   const blob = new Blob([finalBytes], { type: 'application/octet-stream' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'karkas_lira_2024_v23.txt';
+  a.download = `${getCleanTaskName()}.txt`;
   a.click();
 }
 

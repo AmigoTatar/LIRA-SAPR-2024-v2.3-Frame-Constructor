@@ -19,6 +19,11 @@
 
 <div class="main-container">
   <div class="controls">
+    <div class="control-row">
+  <label for="taskName">Имя задачи:</label>
+  <input type="text" id="taskName" value="KARCAS_MK2_V24" onchange="updateModel()">
+</div>
+
     <!-- БЛОК БАЗЫ ЖЕСТКОСТЕЙ -->
     <div class="section">
       <h3>
@@ -116,6 +121,13 @@
         </div>
       </div>
     </div>
+
+    <div class="control-group">
+  <label><input type="checkbox" id="hingeWeb" checked onchange="updateModel()"> Шарниры в решетке ферм (UY, UZ)</label>
+  <label><input type="checkbox" id="hingeBrace" checked onchange="updateModel()"> Шарниры в связях и распорках (UY, UZ)</label>
+  <label><input type="checkbox" id="hingeTrussSupport" onchange="updateModel()"> Шарнирное опирание ферм на колонны</label>
+</div>
+
 
     <!-- 4. СВЯЗИ -->
     <div class="section">
