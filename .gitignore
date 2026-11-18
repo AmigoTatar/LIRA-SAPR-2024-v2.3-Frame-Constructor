@@ -1,0 +1,5 @@
+.vscode/
+.claude/
+*.txt
+*.lir
+.DS_Store
