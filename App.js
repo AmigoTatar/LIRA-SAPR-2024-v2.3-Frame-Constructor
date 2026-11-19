@@ -1,4 +1,3 @@
-// === 1. СТАРТОВАЯ БАЗА ИЗ 59 ПРОФИЛЕЙ (ЧАСТЬ А: ДВУТАВРЫ) ===
 const INITIAL_PROFILES_RAW = [
     ["Двутавр", "Двутавр 10Б1 (ГОСТ Р 57837)", "21678.3 35.9226 3.34418 0.0927588 0 0 /\n0 Y 0.00560958 0.00560958 Z 0.0331415 0.0331415 /\n0 RO 0.0081/\n0 S8 13 5.5 10 0 0", "DoubleT", "dv-b_gostr-57837-2017.profiles.srt", "10Б1", ""],
     ["Двутавр", "Двутавр 12Б1 (ГОСТ Р 57837)", "23169.8 54.0614 4.70328 0.0795803 0 0 /\n0 Y 0.00634349 0.00634349 Z 0.0396815 0.0396815 /\n0 RO 0.0087/\n0 S8 13 6.4 11.76 0 0", "DoubleT", "dv-b_gostr-57837-2017.profiles.srt", "12Б1", ""],
@@ -67,770 +66,760 @@ const INITIAL_PROFILES_RAW = [
   const DB_STORAGE_KEY = 'lira_karcas_profiles_v23';
   let PROFILES_DB = [];
 
-  // Разворачиваем компактную базу + добавляем ЖБ
-   
-  function getDefaultProfiles() {
-    const list = INITIAL_PROFILES_RAW.map(item => ({
-      group: item.at(0),
-      name: item.at(1),
-      block3: `${item.at(2)} ${item.at(6)}`,
-      type: item.at(3),
-      file: item.at(4),
-      prof: item.at(5),
-      extra13: []
-    }));
-    list.push({
-      group: "Железобетон",
-      name: "ЖБ Брус 400x400 (B25)",
-      block3: "S0 3e6 0.16 0.002133 0.002133 0.003604 0.384 0.4 0.4",
-      type: null, file: null, prof: null, extra13: []
-    });
-    return list;
+  
+  function normalizeProfile(raw) {
+    if (Array.isArray(raw)) {
+      const fixedRaw = [...raw];
+      if (fixedRaw.at(5)) {
+        fixedRaw.splice(5, 1, String(fixedRaw.at(5)).replace(/[хХ×]/g, 'x'));
+      }
+      const [cat = '', name = 'Профиль', l3 = '', engType = '', srtFile = '', secSize = '', extra = ''] = fixedRaw;
+      const l13 = srtFile ? `${engType} ${srtFile} ${secSize} ${extra}`.trim() : name;
+      return { cat, name, l3, l13, raw: fixedRaw };
+    }
+    return raw;
   }
 
 
 
-  // Загрузка базы из localStorage при старте
   function initProfilesDB() {
-    PROFILES_DB = getDefaultProfiles();
     try {
       const saved = localStorage.getItem(DB_STORAGE_KEY);
       if (saved) {
-        const customList = JSON.parse(saved);
-        customList.forEach(c => {
-          if (!PROFILES_DB.some(p => p.name === c.name)) {
-            PROFILES_DB.push(c);
-          }
-        });
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0 && parsed.name) {
+          PROFILES_DB = parsed;
+          return;
+        }
       }
-    } catch (e) { console.error("Ошибка чтения localStorage:", e); }
-    updateDbBadge();
+    } catch (e) { console.warn('Ошибка чтения localStorage:', e); }
+    PROFILES_DB = INITIAL_PROFILES_RAW.map(normalizeProfile);
+    saveProfilesDB();
   }
+
+  function resetProfilesDB() {
+    if (!confirm('Сбросить базу жесткостей к стандартным значениям (59 профилей)?')) return;
+    PROFILES_DB = INITIAL_PROFILES_RAW.map(normalizeProfile);
+    saveProfilesDB();
+    populateAllSelects();
+    generateModel();
+  }
+
+
+  function saveProfilesDB() {
+    try {
+      localStorage.setItem(DB_STORAGE_KEY, JSON.stringify(PROFILES_DB));
+      updateDbBadge();
+    } catch (e) { console.warn('Ошибка записи localStorage:', e); }
+  }
+
+  
+
+
+
 
   function updateDbBadge() {
     const badge = document.getElementById('dbCountBadge');
-    if (badge) badge.textContent = `В базе: ${PROFILES_DB.length}`;
+    if (badge) badge.textContent = `В базе: ${PROFILES_DB.length} шт.`;
   }
-
-  // Заполнение всех выпадающих списков с группировкой по типам
-  function populateAllSelects() {
-    const groups = {};
-    PROFILES_DB.forEach(p => {
-      if (!groups[p.group]) groups[p.group] = [];
-      groups[p.group].push(p.name);
-    });
-
-    let optionsHtml = '';
-    for (const [grpName, names] of Object.entries(groups)) {
-      optionsHtml += `<optgroup label="${grpName}">`;
-      names.forEach(n => { optionsHtml += `<option value="${n}">${n}</option>`; });
-      optionsHtml += `</optgroup>`;
-    }
-
-    document.querySelectorAll('select.profile-select').forEach(sel => {
-      const prevVal = sel.value || sel.getAttribute('data-default');
-      sel.innerHTML = optionsHtml;
-      if (prevVal && PROFILES_DB.some(p => p.name === prevVal)) {
-        sel.value = prevVal;
-      }
-    });
-  }
-  // === 2. НАКОПИТЕЛЬНЫЙ ПАРСЕР .TXT ИЗ ЛИРА-САПР ===
-   function handleImportTxt(event) {
+  function handleLiraTxtImport(event) {
     const file = event.target.files[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = function(e) {
-      // ЛИРА-САПР всегда сохраняет текстовые файлы в Windows-1251
-      const decoder = new TextDecoder('windows-1251');
-      const text = decoder.decode(e.target.result);
-      const addedCount = parseLiraTxtAndMerge(text);
-      const statusEl = document.getElementById('importStatus');
-      if (addedCount > 0) {
-        statusEl.style.color = '#27ae60';
-        statusEl.textContent = `✅ Добавлено новых жесткостей: ${addedCount}. Всего в базе: ${PROFILES_DB.length}`;
+      const buffer = e.target.result;
+      const textUtf8 = new TextDecoder('utf-8', { fatal: false }).decode(buffer);
+      const textWin1251 = new TextDecoder('windows-1251', { fatal: false }).decode(buffer);
+
+      const map3 = {};
+      const block3Match = textWin1251.match(/\(\s*3\/([\s\S]*?)\)/);
+      if (block3Match) {
+        const lines = block3Match[1].split('/');
+        lines.forEach(line => {
+          const clean = line.replace(/[\r\n]+/g, ' ').trim();
+          if (!clean) return;
+          const m = clean.match(/^(\d+)\s+(.+)$/);
+          if (m) map3[m[1]] = m[2].trim();
+        });
+      }
+
+      const map13 = {};
+      const block13Match = textUtf8.match(/\{\s*13\/([\s\S]*?)\}/);
+      if (block13Match) {
+        const lines = block13Match[1].split('/');
+        lines.forEach(line => {
+          const clean = line.replace(/[\r\n]+/g, ' ').trim();
+          if (!clean) return;
+          const m = clean.match(/^(\d+)\s+\d+\s+(.+)$/);
+          if (m) map13[m[1]] = m[2].trim();
+        });
+      }
+      let addedCount = 0;
+      let updatedCount = 0;
+
+      Object.keys(map13).forEach(idx => {
+        const name = map13[idx];
+        const l3 = map3[idx];
+        if (!name || !l3) return;
+
+        const existingIdx = PROFILES_DB.findIndex(p => p.name === name);
+        if (existingIdx >= 0) {
+          if (PROFILES_DB[existingIdx].l3 !== l3) {
+            PROFILES_DB[existingIdx].l3 = l3;
+            updatedCount++;
+          }
+        } else {
+          PROFILES_DB.push({ name: name, l3: l3 });
+          addedCount++;
+        }
+      });
+
+      if (addedCount > 0 || updatedCount > 0) {
+        saveProfilesDB();
         populateAllSelects();
-        renderColumnTiers();
-        updateModel();
+        generateModel();
+        alert(`Импорт из "${file.name}" завершен!\n\nДобавлено новых жесткостей: ${addedCount}\nОбновлено существующих: ${updatedCount}\nВсего в базе программы: ${PROFILES_DB.length}`);
       } else {
-        statusEl.style.color = '#e67e22';
-        statusEl.textContent = `ℹ️ Новых жесткостей не найдено (все уже есть в базе или не найден блок ( 3/ )).`;
+        alert(`В файле "${file.name}" не найдено новых жесткостей (или все найденные жесткости уже есть в базе программы).`);
       }
       event.target.value = '';
     };
-    reader.readAsArrayBuffer(file); // Читаем как сырые байты, чтобы декодировать через TextDecoder
+    reader.readAsArrayBuffer(file);
   }
 
-
-  function parseLiraTxtAndMerge(text) {
-    const b3Match = text.match(/\(\s*3\s*\/([\s\S]*?)\)/);
-    if (!b3Match) return 0;
-    const b3Lines = b3Match[1].split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-    const map3 = {};
-    b3Lines.forEach(line => {
-      const m = line.match(/^(\d+)\s+(.+)$/);
-      if (m) map3[m[1]] = m[2].replace(/\/$/, '').trim();
-    });
-
-    const b13Match = text.match(/\{\s*13\s*\/([\s\S]*?)\}/);
-    const map13 = {};
-    if (b13Match) {
-      const b13Lines = b13Match[1].split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-      let curId = null;
-      b13Lines.forEach(line => {
-        const idM = line.match(/^(\d+)\s+([A-Za-z0-9_]+)\s*=\s*(.+)$/);
-        if (idM) {
-          curId = idM[1];
-          map13[curId] = { [idM[2]]: idM[3].replace(/\|/g, '').trim() };
-        } else if (curId) {
-          const kvM = line.match(/^([A-Za-z0-9_]+)\s*=\s*(.+)$/);
-          if (kvM) map13[curId][kvM[1]] = kvM[2].replace(/\|/g, '').trim();
-        }
-      });
-    }
-
-    const typeNames = {
-      'DoubleT': ['Двутавр', 'Двутавр'],
-      'Channel': ['Швеллер', 'Швеллер'],
-      'ChannelBox': ['Швеллер (Коробочка)', 'Коробочка 2х'],
-      'Angle': ['Уголок', 'Уголок'],
-      'AnglesCross': ['Уголок спаренный', 'Уголки крестом 2x'],
-      'AnglesT': ['Уголок спаренный', 'Уголки тавром 2x'],
-      'Box': ['Труба прямоугольная', 'Труба кв.'],
-      'Pipe': ['Труба круглая', 'Труба кр.'],
-      'Sheet': ['Лист / Пластина', 'Лист']
-    };
-
-    let added = 0;
-    const customSaved = JSON.parse(localStorage.getItem(DB_STORAGE_KEY) || '[]');
-
-    for (const [id, block3Str] of Object.entries(map3)) {
-      const meta = map13[id] || {};
-      const t = meta.Type || '';
-      const prof = meta.Prof || `Сечение №${id}`;
-      const srt = meta.File || '';
-      const grpInfo = typeNames[t] || ['Импортированные', 'Профиль'];
-      const displayName = `${grpInfo[1]} ${prof} (${srt ? srt.split('.')[0] : 'ЛИРА'})`.replace('2х ', '2х').replace('2x ', '2x');
-
-      const exists = PROFILES_DB.some(p => p.name === displayName || (p.block3 === block3Str && p.prof === prof));
-      if (!exists) {
-        const newObj = {
-          group: grpInfo[0],
-          name: displayName,
-          block3: block3Str,
-          type: t || null,
-          file: srt || null,
-          prof: meta.Prof || null
-        };
-        PROFILES_DB.push(newObj);
-        customSaved.push(newObj);
-        added++;
-      }
-    }
-
-    if (added > 0) {
-      localStorage.setItem(DB_STORAGE_KEY, JSON.stringify(customSaved));
-      updateDbBadge();
-    }
-    return added;
-  }
-
-
-  function resetProfilesDB() {
-    if (confirm('Удалить все импортированные вручную жесткости и оставить 59 базовых?')) {
-      localStorage.removeItem(DB_STORAGE_KEY);
-      initProfilesDB();
-      populateAllSelects();
-      renderColumnTiers();
-      updateModel();
-      document.getElementById('importStatus').textContent = 'База сброшена до 59 стартовых профилей.';
-    }
-  }
-  // === 3. УПРАВЛЕНИЕ ЯРУСАМИ КОЛОНН ===
+  // Массив ярусов колонн с независимым управлением распорками Y и X
   let columnTiers = [
-    { h: 4.2, sec: "Двутавр 30К1 (ГОСТ Р 57837)" },
-    { h: 4.2, sec: "Двутавр 25К1 (ГОСТ Р 57837)" }
+    { h: 6.0, profIdx: 6, tieY: false, tieX: false },
+    { h: 4.0, profIdx: 4, tieY: true,  tieX: false }
   ];
+  let isUniformX = true;
+  let isUniformY = true;
+  let generatedLiraText = "";
 
-  function renderColumnTiers() {
-    const container = document.getElementById('columnTiersList');
-    container.innerHTML = '';
+  function getProfileOptionsHTML(selectedIndex) {
+    return PROFILES_DB.map((p, idx) => `<option value="${idx}" ${idx === selectedIndex ? 'selected' : ''}>${p.name}</option>`).join('');
+  }
 
-    const groups = {};
-    PROFILES_DB.forEach(p => {
-      if (!groups[p.group]) groups[p.group] = [];
-      groups[p.group].push(p.name);
+  function populateAllSelects() {
+    const defaults = {
+      tieProfile: 21,
+      tieXProfile: 4,
+      vBraceProfile: 38,
+      hBraceProfile: 38,
+      trussTopProf: 43,
+      trussBotProf: 43,
+      trussDiagProf: 39,
+      trussVertProf: 38
+    };
+    Object.keys(defaults).forEach(id => {
+      const sel = document.getElementById(id);
+      if (!sel) return;
+      const prevVal = sel.value !== "" ? parseInt(sel.value) : defaults[id];
+      const safeVal = (prevVal >= 0 && prevVal < PROFILES_DB.length) ? prevVal : Math.min(defaults[id], PROFILES_DB.length - 1);
+      sel.innerHTML = getProfileOptionsHTML(safeVal);
     });
+    renderTiers();
+  }
+
+  function renderTiers() {
+    const container = document.getElementById('columnTiersList');
+    if (!container) return;
+    container.innerHTML = '';
+    const hasTrussEl = document.getElementById('hasTruss');
+    const hasTruss = hasTrussEl ? hasTrussEl.checked : false;
+    const total = columnTiers.length;
 
     columnTiers.forEach((tier, idx) => {
-      let opts = '';
-      for (const [grpName, names] of Object.entries(groups)) {
-        opts += `<optgroup label="${grpName}">`;
-        names.forEach(n => {
-          opts += `<option value="${n}" ${n === tier.sec ? 'selected' : ''}>${n}</option>`;
-        });
-        opts += `</optgroup>`;
-      }
+      const isTop = idx === total - 1;
+      const xDisabled = isTop && hasTruss;
+      const xChecked = xDisabled ? false : !!tier.tieX;
+      const xTitle = xDisabled ? 'Отключено: заменено нижним поясом фермы' : 'Распорки вдоль X по верху яруса';
 
-      const div = document.createElement('div');
-      div.className = 'tier-item';
-      div.innerHTML = `
-        <span style="font-size:11px; font-weight:bold; width:42px;">Яр.${idx+1}:</span>
-        <input type="number" value="${tier.h}" step="0.2" min="0.5" onchange="updateTierH(${idx}, this.value)" title="Высота яруса (м)">
-        <span style="font-size:11px;">м</span>
-        <select onchange="updateTierSec(${idx}, this.value)">${opts}</select>
-        ${columnTiers.length > 1 ? `<button class="btn-red" onclick="removeColumnTier(${idx})" title="Удалить ярус">✕</button>` : ''}
+      const row = document.createElement('div');
+      row.className = 'tier-row';
+      row.innerHTML = `
+        <span style="font-size:11px; color:var(--text-muted); min-width:30px;">Яр.${idx + 1}</span>
+        <input type="number" value="${tier.h}" step="0.5" min="1" max="30" style="width:52px;" title="Высота яруса (м)" onchange="updateTier(${idx}, 'h', this.value)">
+        <select style="flex:1; min-width:85px;" onchange="updateTier(${idx}, 'profIdx', this.value)">
+          ${getProfileOptionsHTML(tier.profIdx)}
+        </select>
+        <label class="tier-chk" title="Распорки вдоль Y по верху яруса">
+          <input type="checkbox" ${tier.tieY ? 'checked' : ''} onchange="updateTier(${idx}, 'tieY', this.checked)">Y
+        </label>
+        <label class="tier-chk ${xDisabled ? 'disabled' : ''}" title="${xTitle}">
+          <input type="checkbox" ${xChecked ? 'checked' : ''} ${xDisabled ? 'disabled' : ''} onchange="updateTier(${idx}, 'tieX', this.checked)">X
+        </label>
+        ${total > 1 ? `<button class="btn-danger" onclick="removeTier(${idx})" title="Удалить ярус">✕</button>` : ''}
       `;
-      container.appendChild(div);
+      container.appendChild(row);
     });
   }
-
-  function addColumnTier() {
-    const lastSec = columnTiers[columnTiers.length - 1].sec;
-    columnTiers.push({ h: 3.0, sec: lastSec });
-    syncHeightFromTiers();
-    renderColumnTiers();
-    updateModel();
+  function addTier() {
+    columnTiers.push({ h: 3.0, profIdx: 4, tieY: true, tieX: false });
+    renderTiers();
+    generateModel();
   }
 
-  function removeColumnTier(idx) {
+  function removeTier(idx) {
     if (columnTiers.length <= 1) return;
     columnTiers.splice(idx, 1);
-    syncHeightFromTiers();
-    renderColumnTiers();
-    updateModel();
+    renderTiers();
+    generateModel();
   }
 
-  function updateTierH(idx, val) {
-    columnTiers[idx].h = Math.max(0.2, parseFloat(val) || 1.0);
-    syncHeightFromTiers();
-    updateModel();
-  }
-
-  function updateTierSec(idx, val) {
-    columnTiers[idx].sec = val;
-    updateModel();
-  }
-
-  function syncHeightFromTiers() {
-    const total = columnTiers.reduce((sum, t) => sum + t.h, 0);
-    document.getElementById('heightZ').value = Number(total.toFixed(3));
-  }
-
-  function onHeightChange() {
-    const newH = Math.max(1, parseFloat(document.getElementById('heightZ').value) || 6.0);
-    const oldTotal = columnTiers.reduce((sum, t) => sum + t.h, 0);
-    if (oldTotal > 0) {
-      const ratio = newH / oldTotal;
-      columnTiers.forEach(t => t.h = Number((t.h * ratio).toFixed(3)));
+  function updateTier(idx, key, val) {
+    if (key === 'h') {
+      columnTiers[idx].h = Math.max(0.5, parseFloat(val) || 3.0);
+    } else if (key === 'profIdx') {
+      columnTiers[idx].profIdx = parseInt(val) || 0;
+    } else {
+      columnTiers[idx][key] = !!val;
     }
-    renderColumnTiers();
-    updateModel();
+    generateModel();
   }
 
-  // === 4. ГЕНЕРАЦИЯ 3D ГЕОМЕТРИИ И ТЕКСТА ЛИРЫ ===
-  let model = { nodes: [], elements: [], supports: [], activeSections: [] };
+  function setSpanMode(uniform) {
+    isUniformX = uniform;
+    document.getElementById('btnUniformX').classList.toggle('active', uniform);
+    document.getElementById('btnCustomX').classList.toggle('active', !uniform);
+    document.getElementById('uniformXBlock').classList.toggle('hidden', !uniform);
+    document.getElementById('customXBlock').classList.toggle('hidden', uniform);
+    generateModel();
+  }
 
-  function parseNumberList(str, fallback) {
+  function setStepMode(uniform) {
+    isUniformY = uniform;
+    document.getElementById('btnUniformY').classList.toggle('active', uniform);
+    document.getElementById('btnCustomY').classList.toggle('active', !uniform);
+    document.getElementById('uniformYBlock').classList.toggle('hidden', !uniform);
+    document.getElementById('customYBlock').classList.toggle('hidden', uniform);
+    generateModel();
+  }
+
+  function parseDimensions(str, fallback) {
     const arr = str.split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n) && n > 0);
     return arr.length > 0 ? arr : fallback;
   }
 
-  function parseIntList(str) {
-    return str.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n) && n >= 1);
-  }
+  let previewData = { nodes: [], bars: [], maxX: 18, maxY: 24, maxZ: 10 };
+  let lastHasTruss = null;
 
-    function getCleanTaskName() {
-    const raw = (document.getElementById('taskName')?.value || 'KARCAS_MK2_V24').trim();
-    const cleaned = raw.replace(/[^A-Za-z0-9_-]/g, '_').replace(/_+/g, '_');
-    return cleaned || 'KARCAS_MK2_V24';
-  }
+  function generateModel() {
+    const taskName = (document.getElementById('taskName').value.trim() || 'Karcas_MK2').replace(/\//g, '_');
+
+    let spans = [];
+    if (isUniformX) {
+      const cnt = Math.max(1, parseInt(document.getElementById('spanCountX').value) || 1);
+      const val = Math.max(1, parseFloat(document.getElementById('spanSizeX').value) || 18);
+      spans = Array(cnt).fill(val);
+    } else {
+      spans = parseDimensions(document.getElementById('customSpansX').value, [18]);
+    }
+
+    let steps = [];
+    if (isUniformY) {
+      const cnt = Math.max(1, parseInt(document.getElementById('stepCountY').value) || 1);
+      const val = Math.max(1, parseFloat(document.getElementById('stepSizeY').value) || 6);
+      steps = Array(cnt).fill(val);
+    } else {
+      steps = parseDimensions(document.getElementById('customStepsY').value, [6]);
+    }
+
+    let xCoords =[0];
+    spans.forEach(s => xCoords.push(+(xCoords[xCoords.length - 1] + s).toFixed(4)));
+    let yCoords =[0];
+    steps.forEach(s => yCoords.push(+(yCoords[yCoords.length - 1] + s).toFixed(4)));
+
+    let zLevels =[0];
 
 
-  function updateModel() {
-    const spansX = parseNumberList(document.getElementById('spansX').value, [6]);
-    const stepsY = parseNumberList(document.getElementById('stepsY').value, [6]);
-    const supportType = document.getElementById('supportType').value;
+
+    columnTiers.forEach(t => zLevels.push(+(zLevels[zLevels.length - 1] + t.h).toFixed(4)));
+    const H = zLevels[zLevels.length - 1];
+
     const colAngle = parseFloat(document.getElementById('colAngle').value) || 0;
-    const addTieBeams = document.getElementById('addTieBeams').checked;
+    const tieYProfIdx = parseInt(document.getElementById('tieProfile').value) || 0;
+    const tieXProfIdx = parseInt(document.getElementById('tieXProfile').value) || 0;
+    const hingeTieY = document.getElementById('hingeTieY').checked;
+    const hingeTieX = document.getElementById('hingeTieX').checked;
+
+    const vBraceMode = document.getElementById('vBraceMode').value;
+    const vBraceProfIdx = parseInt(document.getElementById('vBraceProfile').value) || 0;
+    const hBraceMode = document.getElementById('hBraceMode').value;
+    const hBraceProfIdx = parseInt(document.getElementById('hBraceProfile').value) || 0;
 
     const hasTruss = document.getElementById('hasTruss').checked;
-    document.getElementById('trussParams').style.display = hasTruss ? 'block' : 'none';
-    document.getElementById('tieBeamSecRow').style.display = addTieBeams ? 'flex' : 'none';
-
-    const trussH = parseFloat(document.getElementById('trussH').value) || 1.5;
-    const trussSlope = parseFloat(document.getElementById('trussSlope').value) || 0;
-    let trussPanels = parseInt(document.getElementById('trussPanels').value) || 4;
-    if (trussPanels % 2 !== 0) trussPanels++;
-
-    const trussType = document.getElementById('trussType').value;
-    const hingeWeb = document.getElementById('hingeWeb')?.checked ?? true;
-    const hingeBrace = document.getElementById('hingeBrace')?.checked ?? true;
-    const hingeTrussSupport = document.getElementById('hingeTrussSupport')?.checked ?? false;
-
-    const braceBaysY = parseIntList(document.getElementById('braceBaysY').value);
-    const hasVertBraces = document.getElementById('hasVertBraces').checked;
-    const hasHorizBraces = document.getElementById('hasHorizBraces').checked;
-
-    const usedSecNames = new Set();
-    columnTiers.forEach(t => usedSecNames.add(t.sec));
-    if (addTieBeams) usedSecNames.add(document.getElementById('secTieBeam').value);
-    if (hasTruss) {
-      usedSecNames.add(document.getElementById('secChord').value);
-      usedSecNames.add(document.getElementById('secWeb').value);
+    document.getElementById('trussSettings').classList.toggle('hidden', !hasTruss);
+    if (lastHasTruss !== null && lastHasTruss !== hasTruss) {
+      renderTiers();
     }
-    if (hasVertBraces || hasHorizBraces) {
-      usedSecNames.add(document.getElementById('secBrace').value);
-    }
+    lastHasTruss = hasTruss;
+    const trussH1 = Math.max(0.2, parseFloat(document.getElementById('trussH1').value) || 1.5);
+    const trussH2 = Math.max(0.2, parseFloat(document.getElementById('trussH2').value) || 2.8);
+    let panels = Math.max(2, parseInt(document.getElementById('trussPanels').value) || 6);
+    if (panels % 2 !== 0) panels += 1;
 
-    const activeSections = [];
-    const secNameToId = {};
-    let nextSecId = 1;
-    usedSecNames.forEach(name => {
-      const dbObj = PROFILES_DB.find(p => p.name === name) || PROFILES_DB[0];
-      activeSections.push({ id: nextSecId, ...dbObj });
-      secNameToId[name] = nextSecId;
-      nextSecId++;
-    });
+    const trussTopProf = parseInt(document.getElementById('trussTopProf').value) || 0;
+    const trussBotProf = parseInt(document.getElementById('trussBotProf').value) || 0;
+    const trussDiagProf = parseInt(document.getElementById('trussDiagProf').value) || 0;
+    const trussVertProf = parseInt(document.getElementById('trussVertProf').value) || 0;
+    const hingeTrussEnds = document.getElementById('hingeTrussEnds').checked;
+    const hingeTrussWeb = document.getElementById('hingeTrussWeb').checked;
 
-    const nodes = [];
-    const elements = [];
-    const supports = [];
     const nodeMap = new Map();
-
-    function getOrCreateNode(x, y, z) {
-      const rx = Math.round(x * 1000) / 1000;
-      const ry = Math.round(y * 1000) / 1000;
-      const rz = Math.round(z * 1000) / 1000;
-      const key = `${rx}_${ry}_${rz}`;
+    const nodes = [];
+    function getNodeId(x, y, z) {
+      const kx = Math.round(x * 10000);
+      const ky = Math.round(y * 10000);
+      const kz = Math.round(z * 10000);
+      const key = `${kx}_${ky}_${kz}`;
       if (nodeMap.has(key)) return nodeMap.get(key);
       const id = nodes.length + 1;
-      nodes.push({ id, x: rx, y: ry, z: rz });
+      nodes.push({ id, x: kx / 10000, y: ky / 10000, z: kz / 10000 });
       nodeMap.set(key, id);
       return id;
     }
 
-    const xCoords = new Array(1).fill(0);
-    spansX.forEach(s => xCoords.push(xCoords[xCoords.length - 1] + s));
+    const usedProfilesMap = new Map();
+    const usedProfilesList = [];
+    function getStiffIdx(profIdx) {
+      if (usedProfilesMap.has(profIdx)) return usedProfilesMap.get(profIdx);
+      const newIdx = usedProfilesList.length + 1;
+      usedProfilesMap.set(profIdx, newIdx);
+      usedProfilesList.push({ stiffId: newIdx, profile: PROFILES_DB[profIdx] });
+      return newIdx;
+    }
 
-    const yCoords = new Array(1).fill(0);
-    stepsY.forEach(s => yCoords.push(yCoords[yCoords.length - 1] + s));
+    const bars = [];
+    function addBar(n1, n2, profIdx, role, hingeType = 0, angle = 0) {
+      if (n1 === n2) return;
+      const stiffId = getStiffIdx(profIdx);
+      bars.push({ id: bars.length + 1, n1, n2, stiffId, role, hingeType, angle });
+    }
 
-    const zLevels = new Array(1).fill(0);
-    columnTiers.forEach(t => zLevels.push(zLevels[zLevels.length - 1] + t.h));
-    const H = zLevels[zLevels.length - 1];
-
-    // 1. Колонны по ярусам и опоры
-    for (let j = 0; j < yCoords.length; j++) {
-      const y = yCoords[j];
-      for (let i = 0; i < xCoords.length; i++) {
-        const x = xCoords[i];
-        const baseNode = getOrCreateNode(x, y, 0);
-        supports.push({ node: baseNode, type: supportType });
-
-        for (let tIdx = 0; tIdx < columnTiers.length; tIdx++) {
-          const n1 = getOrCreateNode(x, y, zLevels[tIdx]);
-          const n2 = getOrCreateNode(x, y, zLevels[tIdx + 1]);
-          const secId = secNameToId[columnTiers[tIdx].sec];
-          elements.push({ id: elements.length + 1, n1, n2, sec: secId, group: 'col', hingeStart: false, hingeEnd: false, angle: colAngle });
+    // 1. Колонны по ярусам и опорные узлы
+    const baseNodeIds = [];
+    for (let ix = 0; ix < xCoords.length; ix++) {
+      for (let iy = 0; iy < yCoords.length; iy++) {
+        const x = xCoords[ix];
+        const y = yCoords[iy];
+        baseNodeIds.push(getNodeId(x, y, 0));
+        for (let t = 0; t < columnTiers.length; t++) {
+          const nBot = getNodeId(x, y, zLevels[t]);
+          const nTop = getNodeId(x, y, zLevels[t + 1]);
+          addBar(nBot, nTop, columnTiers[t].profIdx, 'column', 0, colAngle);
         }
       }
     }
 
-    // 2. Распорки по верху колонн вдоль Y
-    if (addTieBeams) {
-      const tieSecId = secNameToId[document.getElementById('secTieBeam').value];
-      for (let i = 0; i < xCoords.length; i++) {
-        const x = xCoords[i];
-        for (let j = 0; j < yCoords.length - 1; j++) {
-          const n1 = getOrCreateNode(x, yCoords[j], H);
-          const n2 = getOrCreateNode(x, yCoords[j + 1], H);
-          elements.push({ id: elements.length + 1, n1, n2, sec: tieSecId, group: 'tie', hingeStart: hingeBrace, hingeEnd: hingeBrace, angle: 0 });
+    // 2. Распорки по ярусам (вдоль Y и вдоль X с автоблокировкой верхних X при наличии ферм)
+    const tieYHingeCode = hingeTieY ? 3 : 0;
+    const tieXHingeCode = hingeTieX ? 3 : 0;
+    columnTiers.forEach((tier, t) => {
+      const zTierTop = zLevels[t + 1];
+      const isTop = t === columnTiers.length - 1;
+
+      if (tier.tieY) {
+        for (let ix = 0; ix < xCoords.length; ix++) {
+          for (let iy = 0; iy < yCoords.length - 1; iy++) {
+            addBar(getNodeId(xCoords[ix], yCoords[iy], zTierTop), getNodeId(xCoords[ix], yCoords[iy + 1], zTierTop), tieYProfIdx, 'tieY', tieYHingeCode, 0);
+          }
         }
       }
-    }
-
-    // 3. Стропильные фермы вдоль X
+      if (tier.tieX && !(isTop && hasTruss)) {
+        for (let iy = 0; iy < yCoords.length; iy++) {
+          for (let ix = 0; ix < xCoords.length - 1; ix++) {
+            addBar(getNodeId(xCoords[ix], yCoords[iy], zTierTop), getNodeId(xCoords[ix + 1], yCoords[iy], zTierTop), tieXProfIdx, 'tieX', tieXHingeCode, 0);
+          }
+        }
+      }
+    });
+    // 3. Стропильные фермы (двускатные с треугольной/раскосной решеткой)
     if (hasTruss) {
-      const chordSecId = secNameToId[document.getElementById('secChord').value];
-      const webSecId = secNameToId[document.getElementById('secWeb').value];
-
-      for (let j = 0; j < yCoords.length; j++) {
-        const y = yCoords[j];
-        for (let sIdx = 0; sIdx < spansX.length; sIdx++) {
-          const xStart = xCoords[sIdx];
-          const L = spansX[sIdx];
-          const dx = L / trussPanels;
-          const halfPanels = trussPanels / 2;
+      const webHingeCode = hingeTrussWeb ? 3 : 0;
+      for (let iy = 0; iy < yCoords.length; iy++) {
+        const y = yCoords[iy];
+        for (let s = 0; s < spans.length; s++) {
+          const xStart = xCoords[s];
+          const L = spans[s];
+          const dx = L / panels;
+          const half = panels / 2;
 
           const botNodes = [];
           const topNodes = [];
-
-          for (let p = 0; p <= trussPanels; p++) {
+          for (let p = 0; p <= panels; p++) {
             const px = xStart + p * dx;
-            const distFromEdge = p <= halfPanels ? p * dx : (trussPanels - p) * dx;
-            const pzTop = H + trussH + distFromEdge * (trussSlope / 100);
-
-            botNodes.push(getOrCreateNode(px, y, H));
-            topNodes.push(getOrCreateNode(px, y, pzTop));
+            const distFromEdge = p <= half ? p : (panels - p);
+            const pz = H + trussH1 + (trussH2 - trussH1) * (distFromEdge / half);
+            botNodes.push(getNodeId(px, y, H));
+            topNodes.push(getNodeId(px, y, pz));
           }
 
-          // Пояса фермы (учет шарнирного опирания на опорах p=0 и p=trussPanels-1)
-          for (let p = 0; p < trussPanels; p++) {
-            const hStart = hingeTrussSupport && p === 0;
-            const hEnd = hingeTrussSupport && p === trussPanels - 1;
-            elements.push({ id: elements.length + 1, n1: botNodes[p], n2: botNodes[p+1], sec: chordSecId, group: 'chord', hingeStart: hStart, hingeEnd: hEnd, angle: 0 });
-            elements.push({ id: elements.length + 1, n1: topNodes[p], n2: topNodes[p+1], sec: chordSecId, group: 'chord', hingeStart: hStart, hingeEnd: hEnd, angle: 0 });
+          for (let p = 0; p < panels; p++) {
+            const isLeftEnd = (p === 0 && hingeTrussEnds);
+            const isRightEnd = (p === panels - 1 && hingeTrussEnds);
+            let hCode = 0;
+            if (isLeftEnd && isRightEnd) hCode = 3;
+            else if (isLeftEnd) hCode = 1;
+            else if (isRightEnd) hCode = 2;
+
+            addBar(botNodes[p], botNodes[p + 1], trussBotProf, 'truss', hCode, 0);
+            addBar(topNodes[p], topNodes[p + 1], trussTopProf, 'truss', 0, 0);
           }
 
-          // Стойки фермы
-          for (let p = 0; p <= trussPanels; p++) {
-            if (trussType === 'pratt' || p === 0 || p === trussPanels || p === halfPanels) {
-              elements.push({ id: elements.length + 1, n1: botNodes[p], n2: topNodes[p], sec: webSecId, group: 'web', hingeStart: hingeWeb, hingeEnd: hingeWeb, angle: 0 });
-            }
+          for (let p = 0; p <= panels; p++) {
+            addBar(botNodes[p], topNodes[p], trussVertProf, 'truss', webHingeCode, 0);
           }
 
-          // Раскосы фермы
-          for (let p = 0; p < trussPanels; p++) {
-            if (trussType === 'pratt') {
-              if (p < halfPanels) {
-                elements.push({ id: elements.length + 1, n1: topNodes[p], n2: botNodes[p+1], sec: webSecId, group: 'web', hingeStart: hingeWeb, hingeEnd: hingeWeb, angle: 0 });
-              } else {
-                elements.push({ id: elements.length + 1, n1: botNodes[p], n2: topNodes[p+1], sec: webSecId, group: 'web', hingeStart: hingeWeb, hingeEnd: hingeWeb, angle: 0 });
-              }
-            } else {
-              if (p % 2 === 0) {
-                elements.push({ id: elements.length + 1, n1: botNodes[p], n2: topNodes[p+1], sec: webSecId, group: 'web', hingeStart: hingeWeb, hingeEnd: hingeWeb, angle: 0 });
-              } else {
-                elements.push({ id: elements.length + 1, n1: topNodes[p], n2: botNodes[p+1], sec: webSecId, group: 'web', hingeStart: hingeWeb, hingeEnd: hingeWeb, angle: 0 });
-              }
-            }
+          for (let p = 0; p < panels; p++) {
+            if (p < half) addBar(topNodes[p], botNodes[p + 1], trussDiagProf, 'truss', webHingeCode, 0);
+            else addBar(botNodes[p], topNodes[p + 1], trussDiagProf, 'truss', webHingeCode, 0);
           }
         }
       }
     }
 
-    // 4. Связи
-    const braceSecId = secNameToId[document.getElementById('secBrace').value];
-    braceBaysY.forEach(bayNum => {
-      const j = bayNum - 1;
-      if (j < 0 || j >= yCoords.length - 1) return;
-      const y1 = yCoords[j];
-      const y2 = yCoords[j + 1];
+    // 4. Вертикальные связи по колоннам
+    const vBays = [];
+    if (vBraceMode === 'ends' && steps.length >= 1) {
+      vBays.push(0);
+      if (steps.length > 1) vBays.push(steps.length - 1);
+    } else if (vBraceMode === 'center' && steps.length >= 1) {
+      vBays.push(Math.floor((steps.length - 1) / 2));
+    } else if (vBraceMode === 'all') {
+      for (let i = 0; i < steps.length; i++) vBays.push(i);
+    }
 
-      if (hasVertBraces) {
-        for (let i = 0; i < xCoords.length; i++) {
-          const x = xCoords[i];
-          for (let tIdx = 0; tIdx < columnTiers.length; tIdx++) {
-            const zBot = zLevels[tIdx];
-            const zTop = zLevels[tIdx + 1];
-            const n11 = getOrCreateNode(x, y1, zBot);
-            const n12 = getOrCreateNode(x, y1, zTop);
-            const n21 = getOrCreateNode(x, y2, zBot);
-            const n22 = getOrCreateNode(x, y2, zTop);
-            elements.push({ id: elements.length + 1, n1: n11, n2: n22, sec: braceSecId, group: 'brace', hingeStart: hingeBrace, hingeEnd: hingeBrace, angle: 0 });
-            elements.push({ id: elements.length + 1, n1: n21, n2: n12, sec: braceSecId, group: 'brace', hingeStart: hingeBrace, hingeEnd: hingeBrace, angle: 0 });
-          }
-        }
-      }
-
-      if (hasHorizBraces) {
-        for (let sIdx = 0; sIdx < spansX.length; sIdx++) {
-          const x1 = xCoords[sIdx];
-          const x2 = xCoords[sIdx + 1];
-          const n11 = getOrCreateNode(x1, y1, H);
-          const n21 = getOrCreateNode(x2, y1, H);
-          const n12 = getOrCreateNode(x1, y2, H);
-          const n22 = getOrCreateNode(x2, y2, H);
-          elements.push({ id: elements.length + 1, n1: n11, n2: n22, sec: braceSecId, group: 'brace', hingeStart: hingeBrace, hingeEnd: hingeBrace, angle: 0 });
-          elements.push({ id: elements.length + 1, n1: n21, n2: n12, sec: braceSecId, group: 'brace', hingeStart: hingeBrace, hingeEnd: hingeBrace, angle: 0 });
+    vBays.forEach(iy => {
+      for (let ix = 0; ix < xCoords.length; ix++) {
+        for (let t = 0; t < columnTiers.length; t++) {
+          const n00 = getNodeId(xCoords[ix], yCoords[iy], zLevels[t]);
+          const n10 = getNodeId(xCoords[ix], yCoords[iy + 1], zLevels[t]);
+          const n01 = getNodeId(xCoords[ix], yCoords[iy], zLevels[t + 1]);
+          const n11 = getNodeId(xCoords[ix], yCoords[iy + 1], zLevels[t + 1]);
+          addBar(n00, n11, vBraceProfIdx, 'brace', 3, 0);
+          addBar(n10, n01, vBraceProfIdx, 'brace', 3, 0);
         }
       }
     });
+    // 5. Горизонтальные связи по покрытию
+    const hBays = [];
+    if (hBraceMode === 'ends' && steps.length >= 1) {
+      hBays.push(0);
+      if (steps.length > 1) hBays.push(steps.length - 1);
+    } else if (hBraceMode === 'all') {
+      for (let i = 0; i < steps.length; i++) hBays.push(i);
+    }
 
-
-    model = { nodes, elements, supports, activeSections };
-    document.getElementById('stats').textContent = `Узлов: ${nodes.length} | Элементов: ${elements.length} | Профилей в схеме: ${activeSections.length}`;
-
-    generateLiraText();
-    draw();
-  }
-  
-    function generateLiraText() {
-    const taskName = getCleanTaskName();
-    let lines = [];
-    lines.push(`( 0/ 1; ${taskName}/ 2; 5/`);
-    lines.push("28; 0 0 1  1 0 0  0 1 0; /");
-    lines.push("33;M 1 CM 100 T 1 C 1 /");
-    lines.push("39;");
-    lines.push("1: ЗАГРУЖЕНИЕ 1 ;");
-    lines.push(" /");
-    lines.push("50; 1 /");
-    lines.push("51; 1 /");
-    lines.push("52; 0.001 /");
-    lines.push("53; 0 /");
-    lines.push("54; 0 /");
-    lines.push("55; 2 /");
-    lines.push(")");
-
-    lines.push("( 1/");
-    model.elements.forEach(el => {
-      lines.push(`10 ${el.sec} ${el.n1} ${el.n2} /`);
+    hBays.forEach(iy => {
+      for (let s = 0; s < spans.length; s++) {
+        const n00 = getNodeId(xCoords[s], yCoords[iy], H);
+        const n10 = getNodeId(xCoords[s + 1], yCoords[iy], H);
+        const n01 = getNodeId(xCoords[s], yCoords[iy + 1], H);
+        const n11 = getNodeId(xCoords[s + 1], yCoords[iy + 1], H);
+        addBar(n00, n11, hBraceProfIdx, 'brace', 3, 0);
+        addBar(n10, n01, hBraceProfIdx, 'brace', 3, 0);
+      }
     });
-    lines.push(")");
 
-    // Блок ( 2/ ) — Шарниры на концах стержней (освобождение UY=5, UZ=6)
-    const hingedElems = model.elements.filter(el => el.hingeStart || el.hingeEnd);
-    if (hingedElems.length > 0) {
-      lines.push("( 2/");
-      hingedElems.forEach(el => {
+    // Формирование выходного файла ЛИРА-САПР 2024 R2.3
+    const cleanTaskName = taskName.replace(/[^A-Za-z0-9_-]/g, '_').replace(/_+/g, '_') || 'KARCAS_MK2';
+    let out = [];
+    out.push(`( 0/ 1; ${cleanTaskName}/ 2; 5/`);
+    out.push("28; 0 0 1  1 0 0  0 1 0; /");
+    out.push("33;M 1 CM 100 T 1 C 1 /");
+    out.push("39;");
+    out.push("1: ЗАГРУЖЕНИЕ 1 ;");
+    out.push(" /");
+    out.push("50; 1 /");
+    out.push("51; 1 /");
+    out.push("52; 0.001 /");
+    out.push("53; 0 /");
+    out.push("54; 0 /");
+    out.push("55; 2 /");
+    out.push(")");
+
+    out.push("( 1/");
+    bars.forEach(b => { out.push(`10 ${b.stiffId} ${b.n1} ${b.n2} /`); });
+    out.push(")");
+
+    const hingedBars = bars.filter(b => b.hingeType > 0);
+    if (hingedBars.length > 0) {
+      out.push("( 2/");
+      hingedBars.forEach(b => {
         let parts = [];
-        if (el.hingeStart) parts.push(`${el.id} 1 5 0/`, `${el.id} 1 6 0/`);
-        if (el.hingeEnd) parts.push(`${el.id} 2 5 0/`, `${el.id} 2 6 0/`);
-        lines.push(parts.join(''));
+        if (b.hingeType === 1 || b.hingeType === 3) parts.push(`${b.id} 1 5 0/`, `${b.id} 1 6 0/`);
+        if (b.hingeType === 2 || b.hingeType === 3) parts.push(`${b.id} 2 5 0/`, `${b.id} 2 6 0/`);
+        out.push(parts.join(''));
       });
-      lines.push(")");
+      out.push(")");
     }
 
-    lines.push("( 3/");
-    model.activeSections.forEach(sec => {
-      lines.push(`${sec.id} ${sec.block3} /`);
+        out.push("( 3/");
+    usedProfilesList.forEach(item => {
+      const p = item.profile;
+      if (Array.isArray(p.raw)) {
+        const [, , l3 = '', , , , extra = ''] = p.raw;
+        out.push(`${item.stiffId} ${`${l3} ${extra}`.trim()} /`);
+      } else {
+        out.push(`${item.stiffId} ${p.l3} /`);
+      }
     });
-    lines.push(")");
+    out.push(")");
 
-    lines.push("( 4/");
-    model.nodes.forEach(n => {
-      lines.push(`${n.x} ${n.y} ${n.z} /`);
+    out.push("( 4/");
+    nodes.forEach(n => { out.push(`${n.x} ${n.y} ${n.z} /`); });
+    out.push(")");
+
+    out.push("( 5/");
+    baseNodeIds.forEach(id => { out.push(`${id} 1 2 3 4 5 6 /`); });
+    out.push(")");
+
+    const rotatedBars = bars.filter(b => Math.abs(b.angle) > 0.001);
+    if (rotatedBars.length > 0) {
+      out.push("( 9/");
+      rotatedBars.forEach(b => { out.push(`${b.id} 1 ${b.angle.toFixed(2)} /`); });
+      out.push(")");
+    }
+
+    const metalSections = usedProfilesList.filter(item => {
+      const r = item.profile.raw;
+      return Array.isArray(r) && r.at(3) && r.at(4) && r.at(5);
     });
-    lines.push(")");
-
-    // Блок ( 5/ ) — Связи (опоры)
-    lines.push("( 5/");
-    model.supports.forEach(s => {
-      const dof = s.type === 'fixed' ? '1 2 3 4 5 6' : '1 2 3';
-      lines.push(`${s.node} ${dof} /`);
-    });
-    lines.push(")");
-
-    // Блок {13/ — Металлические сечения в родном формате ЛИРА-САПР 2024 R2.3
-    const metalSections = model.activeSections.filter(s => s.type && s.file && s.prof);
     if (metalSections.length > 0) {
-      lines.push("{13/");
-      metalSections.forEach(s => {
-        lines.push(`[${s.id}]`);
-        lines.push(`Section = ${s.type} `);
-        lines.push(`MatId = STL `);
-        lines.push(`File  = |${s.file}| `);
-        lines.push(`Shape = |${s.prof}| `);
-        if (s.type === 'AnglesCross' || s.type === 'AnglesT') {
-          lines.push(`Rotation = 2\tBluePoint = 1 \tYellowPoint = 0`);
-          lines.push(`Y1Coupling = 1\t`);
+      out.push("{13/");
+      metalSections.forEach(item => {
+        const [, , , engType, srtFile, secSize] = item.profile.raw;
+        const cleanShape = String(secSize).replace(/[хХ×]/g, 'x');
+        out.push(`[${item.stiffId}]`);
+        out.push(`Section = ${engType} `);
+        out.push(`MatId = STL `);
+        out.push(`File  = |${srtFile}| `);
+        out.push(`Shape = |${cleanShape}| `);
+        if (engType === 'AnglesCross' || engType === 'AnglesT') {
+          out.push(`Rotation = 2\tBluePoint = 1 \tYellowPoint = 0`);
+          out.push(`Y1Coupling = 1\t`);
         }
-        lines.push(``);
+        out.push(``);
       });
-      lines.push("}");
+      out.push("}");
     }
 
-    document.getElementById('liraOutput').value = lines.join('\n');
+
+
+
+    generatedLiraText = out.join('\n');
+    document.getElementById('liraOutput').value = generatedLiraText;
+    document.getElementById('statNodes').textContent = nodes.length;
+    document.getElementById('statBars').textContent = bars.length;
+    document.getElementById('statStiff').textContent = usedProfilesList.length;
+
+    const maxH = H + (hasTruss ? trussH2 : 0);
+    previewData = { nodes, bars, maxX: xCoords[xCoords.length - 1], maxY: yCoords[yCoords.length - 1], maxZ: maxH };
+    drawCanvas();
   }
 
-
-  // === 5. 3D ВИЗУАЛИЗАЦИЯ НА CANVAS ===
-  const canvas = document.getElementById('previewCanvas');
-  const ctx = canvas.getContext('2d');
-  let cam = { rotZ: -0.6, rotX: 0.45, zoom: 1, panX: 0, panY: 0, isDrag: false, btn: 0, lastX: 0, lastY: 0 };
-
-  function setView(mode) {
-    document.querySelectorAll('.canvas-toolbar button').forEach(b => b.classList.remove('active'));
-    if (mode === 'iso') { cam.rotZ = -0.6; cam.rotX = 0.45; document.getElementById('btnViewIso').classList.add('active'); }
-    if (mode === 'front') { cam.rotZ = 0; cam.rotX = 0; document.getElementById('btnViewFront').classList.add('active'); }
-    if (mode === 'side') { cam.rotZ = -Math.PI / 2; cam.rotX = 0; document.getElementById('btnViewSide').classList.add('active'); }
-    if (mode === 'top') { cam.rotZ = 0; cam.rotX = Math.PI / 2; document.getElementById('btnViewTop').classList.add('active'); }
-    cam.panX = 0; cam.panY = 0;
-    draw();
+  function copyText() {
+    const out = document.getElementById('liraOutput');
+    out.select();
+    document.execCommand('copy');
+    const btn = document.getElementById('copyBtn');
+    const orig = btn.innerHTML;
+    btn.innerHTML = '✔ Скопировано!';
+    setTimeout(() => btn.innerHTML = orig, 1800);
   }
 
-  function resetCamera() { cam.zoom = 1; setView('iso'); }
-
-  canvas.addEventListener('mousedown', e => { cam.isDrag = true; cam.btn = e.button; cam.lastX = e.clientX; cam.lastY = e.clientY; });
-  window.addEventListener('mouseup', () => { cam.isDrag = false; });
-  window.addEventListener('mousemove', e => {
-    if (!cam.isDrag) return;
-    const dx = e.clientX - cam.lastX;
-    const dy = e.clientY - cam.lastY;
-    cam.lastX = e.clientX; cam.lastY = e.clientY;
-    if (cam.btn === 2 || e.shiftKey) {
-      cam.panX += dx; cam.panY += dy;
-    } else {
-      cam.rotZ += dx * 0.01;
-      cam.rotX = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, cam.rotX + dy * 0.01));
-    }
-    draw();
-  });
-  canvas.addEventListener('contextmenu', e => e.preventDefault());
-  canvas.addEventListener('wheel', e => {
-    e.preventDefault();
-    cam.zoom *= e.deltaY < 0 ? 1.12 : 0.89;
-    cam.zoom = Math.max(0.1, Math.min(15, cam.zoom));
-    draw();
-  });
-
-  function draw() {
-    const rect = canvas.parentElement.getBoundingClientRect();
-    canvas.width = rect.width;
-    canvas.height = rect.height;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    if (model.nodes.length === 0) return;
-
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
-    model.nodes.forEach(n => {
-      if (n.x < minX) minX = n.x; if (n.x > maxX) maxX = n.x;
-      if (n.y < minY) minY = n.y; if (n.y > maxY) maxY = n.y;
-      if (n.z < minZ) minZ = n.z; if (n.z > maxZ) maxZ = n.z;
-    });
-
-    const cx = (minX + maxX) / 2;
-    const cy = (minY + maxY) / 2;
-    const cz = (minZ + maxZ) / 2;
-    const maxDim = Math.max(maxX - minX, maxY - minY, maxZ - minZ, 1);
-    const baseScale = (Math.min(canvas.width, canvas.height) * 0.65 / maxDim) * cam.zoom;
-
-    const cosZ = Math.cos(cam.rotZ), sinZ = Math.sin(cam.rotZ);
-    const cosX = Math.cos(cam.rotX), sinX = Math.sin(cam.rotX);
-
-    const projNodes = new Array(model.nodes.length + 1);
-    model.nodes.forEach(n => {
-      const dx = n.x - cx, dy = n.y - cy, dz = n.z - cz;
-      const x1 = dx * cosZ - dy * sinZ;
-      const y1 = dx * sinZ + dy * cosZ;
-      const y2 = y1 * cosX - dz * sinX;
-      const z2 = y1 * sinX + dz * cosX;
-      projNodes[n.id] = {
-        sx: canvas.width / 2 + x1 * baseScale + cam.panX,
-        sy: canvas.height / 2 - z2 * baseScale + cam.panY
-      };
-    });
-
-    const colors = { col: '#2980b9', tie: '#16a085', chord: '#27ae60', web: '#e67e22', brace: '#8e44ad' };
-    const widths = { col: 2.5, tie: 1.8, chord: 2.0, web: 1.2, brace: 1.2 };
-
-    model.elements.forEach(el => {
-      const p1 = projNodes[el.n1], p2 = projNodes[el.n2];
-      if (!p1 || !p2) return;
-      ctx.beginPath();
-      ctx.moveTo(p1.sx, p1.sy);
-      ctx.lineTo(p2.sx, p2.sy);
-      ctx.strokeStyle = colors[el.group] || '#333';
-      ctx.lineWidth = widths[el.group] || 1.5;
-      ctx.stroke();
-
-      if (document.getElementById('showElems').checked) {
-        ctx.fillStyle = '#555';
-        ctx.font = '10px sans-serif';
-        ctx.fillText(el.id, (p1.sx + p2.sx) / 2, (p1.sy + p2.sy) / 2);
-      }
-            // Визуализация шарниров на 3D-схеме
-      if (el.hingeStart || el.hingeEnd) {
-        ctx.fillStyle = '#ffffff';
-        ctx.strokeStyle = '#222222';
-        ctx.lineWidth = 1;
-        if (el.hingeStart) {
-          const hx = p1.sx + (p2.sx - p1.sx) * 0.12;
-          const hy = p1.sy + (p2.sy - p1.sy) * 0.12;
-          ctx.beginPath();
-          ctx.arc(hx, hy, 2.2, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.stroke();
-        }
-        if (el.hingeEnd) {
-          const hx = p2.sx + (p1.sx - p2.sx) * 0.12;
-          const hy = p2.sy + (p1.sy - p2.sy) * 0.12;
-          ctx.beginPath();
-          ctx.arc(hx, hy, 2.2, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.stroke();
-        }
-      }
-
-    });
-
-    model.supports.forEach(s => {
-      const p = projNodes[s.node];
-      if (!p) return;
-      ctx.fillStyle = s.type === 'fixed' ? '#c0392b' : '#e67e22';
-      ctx.fillRect(p.sx - 4, p.sy - 4, 8, 8);
-    });
-
-    if (document.getElementById('showNodes').checked) {
-      ctx.fillStyle = '#000';
-      ctx.font = '10px sans-serif';
-      model.nodes.forEach(n => {
-        const p = projNodes[n.id];
-        ctx.beginPath();
-        ctx.arc(p.sx, p.sy, 2.5, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillText(n.id, p.sx + 4, p.sy - 4);
-      });
-    }
-  }
-
-  // === 6. ЭКСПОРТ И ИНИЦИАЛИЗАЦИЯ ===
-     function encodeWindows1251(str) {
-    // Заменяем математический знак умножения '×' на русскую 'х' перед кодированием
+  function encodeWindows1251(str) {
     const cleanStr = str.replace(/\u00D7/g, 'х').replace(/\uFFFD/g, '');
     const bytes = new Uint8Array(cleanStr.length);
     for (let i = 0; i < cleanStr.length; i++) {
       const c = cleanStr.charCodeAt(i);
       if (c < 128) bytes[i] = c;
-      else if (c >= 0x0410 && c <= 0x044F) bytes[i] = c - 0x0350; // А-Я, а-я
-      else if (c === 0x0401) bytes[i] = 0xA8; // Ё
-      else if (c === 0x0451) bytes[i] = 0xB8; // ё
-      else if (c === 0x2116) bytes[i] = 0xB9; // №
+      else if (c >= 0x0410 && c <= 0x044F) bytes[i] = c - 0x0350;
+      else if (c === 0x0401) bytes[i] = 0xA8;
+      else if (c === 0x0451) bytes[i] = 0xB8;
+      else if (c === 0x2116) bytes[i] = 0xB9;
       else bytes[i] = 0x3F;
     }
     return bytes;
   }
 
+  function downloadTxt() {
+    const rawName = (document.getElementById('taskName').value.trim() || 'KARCAS_MK2');
+    const cleanTaskName = rawName.replace(/[^A-Za-z0-9_-]/g, '_').replace(/_+/g, '_') || 'KARCAS_MK2';
+    const splitIndex = generatedLiraText.indexOf('{13/');
 
- function downloadLiraFile() {
-  const text = document.getElementById('liraOutput').value;
-  const splitIndex = text.indexOf('{13/');
+    let finalBytes;
+    if (splitIndex !== -1) {
+      const mainPart = encodeWindows1251(generatedLiraText.slice(0, splitIndex));
+      const srtPart = new TextEncoder().encode(generatedLiraText.slice(splitIndex));
+      finalBytes = new Uint8Array(mainPart.length + srtPart.length);
+      finalBytes.set(mainPart, 0);
+      finalBytes.set(srtPart, mainPart.length);
+    } else {
+      finalBytes = encodeWindows1251(generatedLiraText);
+    }
 
-  let finalBytes;
-  if (splitIndex !== -1) {
-    // Основная схема (0/ .. 5/) в Windows-1251
-    const mainPart = encodeWindows1251(text.slice(0, splitIndex));
-    // Блок жесткостей {13/ в UTF-8 для новых сортаментов .profiles.srt
-    const srtPart = new TextEncoder().encode(text.slice(splitIndex));
-
-    finalBytes = new Uint8Array(mainPart.length + srtPart.length);
-    finalBytes.set(mainPart, 0);
-    finalBytes.set(srtPart, mainPart.length);
-  } else {
-    finalBytes = encodeWindows1251(text);
+    const blob = new Blob([finalBytes], { type: 'application/octet-stream' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${cleanTaskName}.txt`;
+    a.click();
+    URL.revokeObjectURL(a.href);
   }
 
-  const blob = new Blob([finalBytes], { type: 'application/octet-stream' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `${getCleanTaskName()}.txt`;
-  a.click();
-}
 
+  // ==========================================
+  // 3D CANVAS ПРЕВЬЮ + ГИЗМО ОСЕЙ XYZ
+  // ==========================================
+  const canvas = document.getElementById('previewCanvas');
+  const ctx = canvas.getContext('2d');
+  let camAngleZ = -0.65;
+  let camAngleX = 0.42;
+  let camZoom = 1.0;
+  let isDragging = false;
+  let lastMouse = { x: 0, y: 0 };
 
+  canvas.addEventListener('mousedown', e => { isDragging = true; lastMouse = { x: e.clientX, y: e.clientY }; });
+  window.addEventListener('mouseup', () => { isDragging = false; });
+  canvas.addEventListener('mousemove', e => {
+    if (!isDragging) return;
+    camAngleZ -= (e.clientX - lastMouse.x) * 0.008;
+    camAngleX = Math.max(-1.4, Math.min(1.4, camAngleX + (e.clientY - lastMouse.y) * 0.008));
+    lastMouse = { x: e.clientX, y: e.clientY };
+    drawCanvas();
+  });
+  canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    camZoom = Math.max(0.3, Math.min(3.5, camZoom * (e.deltaY > 0 ? 0.9 : 1.1)));
+    drawCanvas();
+  }, { passive: false });
 
-  function copyToClipboard() {
-    const ta = document.getElementById('liraOutput');
-    ta.select();
-    document.execCommand('copy');
-    alert('Текст задачи скопирован в буфер обмена!');
+  function resetCamera() {
+    camAngleZ = -0.65; camAngleX = 0.42; camZoom = 1.0;
+    drawCanvas();
   }
 
-  window.addEventListener('resize', draw);
+  function projectPoint(x, y, z, cx, cy, scale) {
+    const cosZ = Math.cos(camAngleZ), sinZ = Math.sin(camAngleZ);
+    const cosX = Math.cos(camAngleX), sinX = Math.sin(camAngleX);
+    const x1 = x * cosZ - y * sinZ;
+    const y1 = x * sinZ + y * cosZ;
+    const z2 = z * cosX - y1 * sinX;
+    return { x: cx + x1 * scale, y: cy - z2 * scale };
+  }
 
-  // Старт приложения
-  initProfilesDB();
-  populateAllSelects();
-  renderColumnTiers();
-  updateModel();
+  function drawAxisGizmo() {
+    const ox = 52, oy = canvas.height - 62, len = 30;
+    const axes = [
+      { label: 'X', dx: 1, dy: 0, dz: 0, color: '#ef4444' },
+      { label: 'Y', dx: 0, dy: 1, dz: 0, color: '#22c55e' },
+      { label: 'Z', dx: 0, dy: 0, dz: 1, color: '#3b82f6' }
+    ];
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(ox, oy, len + 15, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.72)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(148, 163, 184, 0.25)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    axes.forEach(ax => {
+      const end = projectPoint(ax.dx, ax.dy, ax.dz, ox, oy, len);
+      const ang = Math.atan2(end.y - oy, end.x - ox);
+      ctx.beginPath();
+      ctx.moveTo(ox, oy);
+      ctx.lineTo(end.x, end.y);
+      ctx.strokeStyle = ax.color;
+      ctx.lineWidth = 2.2;
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(end.x, end.y);
+      ctx.lineTo(end.x - 6 * Math.cos(ang - 0.4), end.y - 6 * Math.sin(ang - 0.4));
+      ctx.lineTo(end.x - 6 * Math.cos(ang + 0.4), end.y - 6 * Math.sin(ang + 0.4));
+      ctx.closePath();
+      ctx.fillStyle = ax.color;
+      ctx.fill();
+
+      ctx.fillStyle = ax.color;
+      ctx.font = 'bold 11px sans-serif';
+      ctx.fillText(ax.label, end.x + 6 * Math.cos(ang) - 3, end.y + 6 * Math.sin(ang) + 4);
+    });
+    ctx.restore();
+  }
+
+  function drawCanvas() {
+    const rect = canvas.parentElement.getBoundingClientRect();
+    if (canvas.width !== rect.width || canvas.height !== rect.height) {
+      canvas.width = rect.width;
+      canvas.height = rect.height;
+    }
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const { nodes, bars, maxX, maxY, maxZ } = previewData;
+    if (!nodes.length) return;
+
+    const midX = maxX / 2, midY = maxY / 2, midZ = maxZ / 2;
+    const maxDim = Math.max(maxX, maxY, maxZ, 10);
+    const scale = (Math.min(canvas.width, canvas.height) * 0.62 / maxDim) * camZoom;
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2 + 15;
+
+    const colors = {
+      column: '#3b82f6',
+      tieY: '#14b8a6',
+      tieX: '#f97316',
+      truss: '#22c55e',
+      brace: '#eab308'
+    };
+
+    bars.forEach(b => {
+      const p1 = nodes[b.n1 - 1];
+      const p2 = nodes[b.n2 - 1];
+      const s1 = projectPoint(p1.x - midX, p1.y - midY, p1.z - midZ, cx, cy, scale);
+      const s2 = projectPoint(p2.x - midX, p2.y - midY, p2.z - midZ, cx, cy, scale);
+
+      ctx.beginPath();
+      ctx.moveTo(s1.x, s1.y);
+      ctx.lineTo(s2.x, s2.y);
+      ctx.strokeStyle = colors[b.role] || '#94a3b8';
+      ctx.lineWidth = b.role === 'column' ? 2.4 : 1.5;
+      ctx.stroke();
+
+      if (b.hingeType > 0) {
+        ctx.fillStyle = '#ffffff';
+        if (b.hingeType === 1 || b.hingeType === 3) {
+          ctx.beginPath(); ctx.arc(s1.x + (s2.x - s1.x) * 0.12, s1.y + (s2.y - s1.y) * 0.12, 2.2, 0, Math.PI * 2); ctx.fill();
+        }
+        if (b.hingeType === 2 || b.hingeType === 3) {
+          ctx.beginPath(); ctx.arc(s2.x - (s2.x - s1.x) * 0.12, s2.y - (s2.y - s1.y) * 0.12, 2.2, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+    });
+
+    nodes.forEach(n => {
+      const s = projectPoint(n.x - midX, n.y - midY, n.z - midZ, cx, cy, scale);
+      ctx.beginPath();
+      if (n.z === 0) {
+        ctx.fillStyle = '#ef4444';
+        ctx.fillRect(s.x - 3, s.y - 3, 6, 6);
+      } else {
+        ctx.fillStyle = '#cbd5e1';
+        ctx.arc(s.x, s.y, 1.8, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    });
+
+    drawAxisGizmo();
+  }
+
+  window.addEventListener('resize', drawCanvas);
+  window.addEventListener('DOMContentLoaded', () => {
+    initProfilesDB();
+    updateDbBadge();
+    populateAllSelects();
+    generateModel();
+  });

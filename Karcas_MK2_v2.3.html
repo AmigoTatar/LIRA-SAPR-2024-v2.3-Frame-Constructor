@@ -2,190 +2,267 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <title>Генератор каркаса для ЛИРА-САПР 2024 (v2.3 — База 59 профилей + Парсер)</title>
-  <link rel="stylesheet" href="style.css">
+  <title>Генератор каркаса для ЛИРА-САПР 2024 (v2.3 — Распорки X/Y + Оси XYZ)</title>
+  <style>
+    :root {
+      --bg-main: #0f172a;
+      --bg-panel: #1e293b;
+      --bg-input: #0f172a;
+      --border: #334155;
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --accent: #3b82f6;
+      --accent-hover: #2563eb;
+      --success: #10b981;
+      --danger: #ef4444;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, sans-serif; }
+    body { background: var(--bg-main); color: var(--text-main); display: flex; height: 100vh; overflow: hidden; font-size: 13px; }
+    .sidebar { width: 410px; background: var(--bg-panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; height: 100vh; }
+    .sidebar-header { padding: 14px 16px; border-bottom: 1px solid var(--border); background: #162032; }
+    .sidebar-header h1 { font-size: 15px; font-weight: 600; color: #fff; margin-bottom: 4px; }
+    .sidebar-header p { font-size: 11px; color: var(--text-muted); }
+    .stats-bar { display: flex; gap: 10px; margin-top: 8px; padding: 6px 10px; background: var(--bg-input); border-radius: 6px; font-size: 11px; border: 1px solid var(--border); }
+    .stats-bar span b { color: var(--accent); }
+    .sidebar-content { flex: 1; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 14px; }
+    .section-card { background: rgba(15, 23, 42, 0.45); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+    .section-title { font-size: 12px; font-weight: 600; color: #93c5fd; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+    .form-group { margin-bottom: 8px; }
+    .form-group:last-child { margin-bottom: 0; }
+    label { display: block; font-size: 11px; color: var(--text-muted); margin-bottom: 3px; }
+    input[type="text"], input[type="number"], select { width: 100%; background: var(--bg-input); border: 1px solid var(--border); color: var(--text-main); padding: 5px 8px; border-radius: 5px; font-size: 12px; outline: none; }
+    input:focus, select:focus { border-color: var(--accent); }
+    .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .toggle-group { display: flex; background: var(--bg-input); border-radius: 5px; border: 1px solid var(--border); overflow: hidden; margin-bottom: 6px; }
+    .toggle-group button { flex: 1; background: transparent; border: none; color: var(--text-muted); padding: 4px; font-size: 11px; cursor: pointer; }
+    .toggle-group button.active { background: var(--accent); color: #fff; font-weight: 600; }
+    .tier-row { display: flex; align-items: center; gap: 5px; margin-bottom: 6px; background: var(--bg-input); padding: 5px 6px; border-radius: 5px; border: 1px solid var(--border); }
+    .tier-chk { display: inline-flex; align-items: center; gap: 2px; font-size: 11px; font-weight: 600; color: #e2e8f0; cursor: pointer; margin: 0; padding: 2px 4px; border-radius: 4px; background: rgba(51, 65, 85, 0.5); user-select: none; }
+    .tier-chk input { margin: 0; cursor: pointer; }
+    .tier-chk.disabled { opacity: 0.4; cursor: not-allowed; text-decoration: line-through; }
+    .tier-chk.disabled input { cursor: not-allowed; }
+    .btn-sm { background: #334155; color: #fff; border: none; padding: 3px 8px; border-radius: 4px; font-size: 11px; cursor: pointer; }
+    .btn-sm:hover { background: #475569; }
+    .btn-danger { background: rgba(239, 68, 68, 0.2); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.4); padding: 3px 6px; border-radius: 4px; cursor: pointer; font-size: 11px; }
+    .btn-danger:hover { background: var(--danger); color: #fff; }
+    .checkbox-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; cursor: pointer; }
+    .checkbox-row input { width: auto; cursor: pointer; }
+    .checkbox-row label { margin: 0; color: var(--text-main); cursor: pointer; font-size: 12px; }
+    .main-area { flex: 1; display: flex; flex-direction: column; height: 100vh; background: #0b1120; }
+    .canvas-container { flex: 1; position: relative; overflow: hidden; }
+    canvas { width: 100%; height: 100%; display: block; cursor: grab; }
+    canvas:active { cursor: grabbing; }
+    .canvas-overlay { position: absolute; top: 12px; left: 12px; background: rgba(15, 23, 42, 0.85); padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border); font-size: 11px; color: var(--text-muted); pointer-events: none; }
+    .legend { position: absolute; bottom: 12px; right: 12px; background: rgba(15, 23, 42, 0.85); padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border); display: flex; gap: 12px; font-size: 11px; }
+    .legend-item { display: flex; align-items: center; gap: 5px; }
+    .dot { width: 10px; height: 10px; border-radius: 2px; }
+    .output-panel { height: 230px; background: var(--bg-panel); border-top: 1px solid var(--border); display: flex; flex-direction: column; padding: 10px 16px; }
+    .output-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+    .btn-primary { background: var(--accent); color: #fff; border: none; padding: 6px 14px; border-radius: 5px; font-weight: 600; cursor: pointer; font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
+    .btn-primary:hover { background: var(--accent-hover); }
+    .btn-success { background: var(--success); color: #fff; border: none; padding: 6px 14px; border-radius: 5px; font-weight: 600; cursor: pointer; font-size: 12px; }
+    textarea { flex: 1; width: 100%; background: #090d16; color: #a5f3fc; border: 1px solid var(--border); border-radius: 5px; padding: 8px; font-family: 'Consolas', monospace; font-size: 11px; resize: none; outline: none; }
+    .hidden { display: none !important; }
+    .db-badge { font-size: 10px; background: rgba(16, 185, 129, 0.15); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.3); padding: 2px 6px; border-radius: 4px; }
+  </style>
 </head>
 <body>
 
-<div class="header">
-  <div>
-    <h1>Конструктор каркаса ЛИРА-САПР 2024 (v2.3)</h1>
-    <span>База 59 профилей + Накопительный импорт жесткостей из .txt ЛИРЫ</span>
-  </div>
-  <div id="stats" style="font-size: 12px; background: rgba(255,255,255,0.1); padding: 5px 10px; border-radius: 4px;">
-    Узлов: 0 | Элементов: 0
-  </div>
-</div>
-
-<div class="main-container">
-  <div class="controls">
-    <div class="control-row">
-  <label for="taskName">Имя задачи:</label>
-  <input type="text" id="taskName" value="KARCAS_MK2_V24" onchange="updateModel()">
-</div>
-
-    <!-- БЛОК БАЗЫ ЖЕСТКОСТЕЙ -->
-    <div class="section">
-      <h3>
-        <span>📚 База жесткостей</span>
-        <span id="dbCountBadge" class="db-badge">Загружено: 59</span>
-      </h3>
-      <div class="row" style="gap: 6px;">
-        <input type="file" id="importTxtInput" accept=".txt" style="display:none" onchange="handleImportTxt(event)">
-        <button class="btn btn-blue" onclick="document.getElementById('importTxtInput').click()">📂 Импорт из .txt ЛИРЫ</button>
-        <button class="btn btn-gray" style="width: auto;" onclick="resetProfilesDB()" title="Сбросить добавленные вручную и оставить 59 базовых">Сброс</button>
-      </div>
-      <div id="importStatus" style="font-size: 11px; color: #7f8c8d; margin-top: 4px;">
-        Поддерживает блоки ( 3/ ) и {13/} из «Текста задачи» ЛИРА-САПР.
-      </div>
+<div class="sidebar">
+  <div class="sidebar-header">
+    <h1>Каркас МК (ЛИРА-САПР 2024 R2.3)</h1>
+    <p>Генератор пространственной расчетной схемы (.txt)</p>
+    <div class="stats-bar">
+      <span>Узлов: <b id="statNodes">0</b></span>
+      <span>Стержней: <b id="statBars">0</b></span>
+      <span>Жесткостей: <b id="statStiff">0</b></span>
     </div>
-    <!-- 1. ГЕОМЕТРИЯ -->
-    <div class="section">
-      <h3>1. Геометрия 3D каркаса (м)</h3>
-      <div class="row">
-        <label>Шаг колонн вдоль X (пролеты):</label>
-        <input type="text" id="spansX" value="6, 6, 6, 6, 6" title="Например: 6, 6, 6" onchange="updateModel()">
+  </div>
+
+  <div class="sidebar-content">
+    <div class="section-card" style="border-color: rgba(16, 185, 129, 0.4);">
+      <div class="section-title">
+        <span>База жесткостей (Сортамент)</span>
+        <span class="db-badge" id="dbCountBadge">В базе: 59 шт.</span>
       </div>
-      <div class="row">
-        <label>Шаг рам вдоль Y (блоки):</label>
-        <input type="text" id="stepsY" value="6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6" title="Например: 6, 6, 6" onchange="updateModel()">
+      <div style="display: flex; gap: 6px;">
+        <button class="btn-sm" style="flex:1; background: rgba(16, 185, 129, 0.2); border: 1px solid rgba(16, 185, 129, 0.4); color: #a7f3d0;" onclick="document.getElementById('liraTxtInput').click()">📂 Добавить из .txt ЛИРЫ</button>
+        <button class="btn-danger" onclick="resetProfilesDB()" title="Сбросить базу к стандартным 59 профилям">Сброс</button>
       </div>
-      <div class="row">
-        <label>Полная высота колонн H (м):</label>
-        <input type="number" id="heightZ" value="8.4" step="0.2" min="2" max="50" onchange="onHeightChange()">
-      </div>
-      <div class="row">
-        <label>Опирание колонн (Z=0):</label>
-        <select id="supportType" onchange="updateModel()">
-          <option value="fixed">Жесткая заделка (X,Y,Z,UX,UY,UZ)</option>
-          <option value="pinned">Шарнирное (X,Y,Z)</option>
-        </select>
-      </div>
+      <input type="file" id="liraTxtInput" accept=".txt" class="hidden" onchange="handleLiraTxtImport(event)">
     </div>
 
-    <!-- 2. КОЛОННЫ И ЯРУСЫ -->
-    <div class="section">
-      <h3>
-        <span>2. Ярусы колонн (снизу вверх)</span>
-        <button class="btn-add" onclick="addColumnTier()">+ Ярус</button>
-      </h3>
+    <div class="section-card">
+      <div class="section-title">1. Сетка осей (Пролеты X и Шаги Y)</div>
+      <div class="form-group">
+        <label>Имя задачи в ЛИРА-САПР</label>
+        <input type="text" id="taskName" value="Karcas_MK2" oninput="generateModel()">
+      </div>
+      <div class="form-group">
+        <label>Пролеты поперек здания (ось X, м)</label>
+        <div class="toggle-group">
+          <button id="btnUniformX" class="active" onclick="setSpanMode(true)">Одинаковые</button>
+          <button id="btnCustomX" onclick="setSpanMode(false)">Переменные</button>
+        </div>
+        <div id="uniformXBlock" class="row-2">
+          <div><label>Кол-во пролетов</label><input type="number" id="spanCountX" value="1" min="1" max="10" oninput="generateModel()"></div>
+          <div><label>Ширина пролета (м)</label><input type="number" id="spanSizeX" value="18" step="0.5" min="3" oninput="generateModel()"></div>
+        </div>
+        <div id="customXBlock" class="hidden">
+          <label>Пролеты через запятую (м)</label>
+          <input type="text" id="customSpansX" value="18, 12, 18" oninput="generateModel()">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Шаги колонн вдоль здания (ось Y, м)</label>
+        <div class="toggle-group">
+          <button id="btnUniformY" class="active" onclick="setStepMode(true)">Одинаковые</button>
+          <button id="btnCustomY" onclick="setStepMode(false)">Переменные</button>
+        </div>
+        <div id="uniformYBlock" class="row-2">
+          <div><label>Кол-во шагов</label><input type="number" id="stepCountY" value="4" min="1" max="30" oninput="generateModel()"></div>
+          <div><label>Шаг колонн (м)</label><input type="number" id="stepSizeY" value="6" step="0.5" min="2" oninput="generateModel()"></div>
+        </div>
+        <div id="customYBlock" class="hidden">
+          <label>Шаги через запятую (м)</label>
+          <input type="text" id="customStepsY" value="6, 6, 12, 6" oninput="generateModel()">
+        </div>
+      </div>
+    </div>
+    <div class="section-card">
+      <div class="section-title">
+        <span>2. Ярусы колонн и распорки (Y / X)</span>
+        <button class="btn-sm" onclick="addTier()">+ Ярус</button>
+      </div>
+      <div style="font-size:10px; color:var(--text-muted); margin-bottom:6px;">
+        Галочки <b>Y</b> и <b>X</b> включают распорки по верху каждого яруса (верхние X отключаются при наличии ферм).
+      </div>
       <div id="columnTiersList"></div>
-      <div class="row" style="margin-top: 6px; border-top: 1px dashed #dce1e7; padding-top: 6px;">
-        <label>Поворот сечения колонн (°):</label>
-        <input type="number" id="colAngle" value="0" step="90" onchange="updateModel()">
-      </div>
-      <label class="checkbox-row">
-        <input type="checkbox" id="addTieBeams" checked onchange="updateModel()">
-        <span>Распорки по верху колонн (вдоль Y)</span>
-      </label>
-      <div class="row" id="tieBeamSecRow" style="margin-top: 4px;">
-        <label>Сечение распорок:</label>
-        <select id="secTieBeam" class="profile-select" data-default="Двутавр 20Б1 (ГОСТ Р 57837)" onchange="updateModel()"></select>
-      </div>
-    </div>
-
-    <!-- 3. ФЕРМЫ ПОКРЫТИЯ -->
-    <div class="section">
-      <h3>3. Кровельные фермы (вдоль X)</h3>
-      <label class="checkbox-row" style="margin-bottom: 6px;">
-        <input type="checkbox" id="hasTruss" checked onchange="updateModel()">
-        <span>Генерировать стропильные фермы</span>
-      </label>
-      <div id="trussParams">
-        <div class="row">
-          <label>Высота фермы на опоре (м):</label>
-          <input type="number" id="trussH" value="1.5" step="0.1" min="0.5" max="5" onchange="updateModel()">
-        </div>
-        <div class="row">
-          <label>Уклон верхнего пояса (%):</label>
-          <input type="number" id="trussSlope" value="10" step="1" min="0" max="30" onchange="updateModel()">
-        </div>
-        <div class="row">
-          <label>Кол-во панелей на пролет:</label>
-          <input type="number" id="trussPanels" value="4" step="2" min="2" max="16" onchange="updateModel()">
-        </div>
-        <div class="row">
-          <label>Тип решетки:</label>
-          <select id="trussType" onchange="updateModel()">
-            <option value="pratt">Треугольная со стойками</option>
-            <option value="warren">Раскосная (Уоррена)</option>
+      <div class="row-2" style="margin-top:8px;">
+        <div class="form-group" style="margin:0;">
+          <label>Поворот колонн (град.)</label>
+          <select id="colAngle" onchange="generateModel()">
+            <option value="0">0° (стенка вдоль X)</option>
+            <option value="90">90° (стенка вдоль Y)</option>
           </select>
         </div>
-        <div class="row">
-          <label>Сечение поясов (верх/низ):</label>
-          <select id="secChord" class="profile-select" data-default="Уголок 90х90х7 (ГОСТ 8509)" onchange="updateModel()"></select>
-        </div>
-        <div class="row">
-          <label>Сечение решетки (раскосы):</label>
-          <select id="secWeb" class="profile-select" data-default="Уголок гн. 60х4 (ГОСТ 19771)" onchange="updateModel()"></select>
+        <div class="form-group" style="margin:0;">
+          <label>Распорки вдоль Y</label>
+          <select id="tieProfile" onchange="generateModel()"></select>
         </div>
       </div>
+      <div class="form-group" style="margin-top:8px;">
+        <label>Распорки / ригели вдоль X</label>
+        <select id="tieXProfile" onchange="generateModel()"></select>
+      </div>
     </div>
 
-    <div class="control-group">
-  <label><input type="checkbox" id="hingeWeb" checked onchange="updateModel()"> Шарниры в решетке ферм (UY, UZ)</label>
-  <label><input type="checkbox" id="hingeBrace" checked onchange="updateModel()"> Шарниры в связях и распорках (UY, UZ)</label>
-  <label><input type="checkbox" id="hingeTrussSupport" onchange="updateModel()"> Шарнирное опирание ферм на колонны</label>
+    <div class="section-card">
+      <div class="section-title">3. Связи и шарниры распорок</div>
+      <div class="row-2">
+        <div class="form-group">
+          <label>Вертикальные связи</label>
+          <select id="vBraceMode" onchange="generateModel()">
+            <option value="ends">По торцам здания</option>
+            <option value="center">В центре здания</option>
+            <option value="all">Во всех шагах</option>
+            <option value="none">Без связей</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Сечение верт. связей</label>
+          <select id="vBraceProfile" onchange="generateModel()"></select>
+        </div>
+      </div>
+      <div class="row-2">
+        <div class="form-group">
+          <label>Горизонтальные связи</label>
+          <select id="hBraceMode" onchange="generateModel()">
+            <option value="ends">По торцам (в уровне НП)</option>
+            <option value="all">Во всех шагах</option>
+            <option value="none">Без связей</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Сечение гориз. связей</label>
+          <select id="hBraceProfile" onchange="generateModel()"></select>
+        </div>
+      </div>
+      <div class="checkbox-row" style="margin-top:6px;">
+        <input type="checkbox" id="hingeTieY" checked onchange="generateModel()">
+        <label for="hingeTieY">Шарниры в распорках вдоль Y (UY, UZ)</label>
+      </div>
+      <div class="checkbox-row">
+        <input type="checkbox" id="hingeTieX" onchange="generateModel()">
+        <label for="hingeTieX">Шарниры в распорках/ригелях вдоль X (UY, UZ)</label>
+      </div>
+    </div>
+
+    <div class="section-card">
+      <div class="section-title">4. Стропильные фермы (ось X)</div>
+      <div class="checkbox-row">
+        <input type="checkbox" id="hasTruss" checked onchange="generateModel()">
+        <label for="hasTruss">Генерировать стропильные фермы</label>
+      </div>
+      <div id="trussSettings">
+        <div class="row-2">
+          <div class="form-group"><label>Высота на опоре H1 (м)</label><input type="number" id="trussH1" value="1.5" step="0.1" min="0.5" oninput="generateModel()"></div>
+          <div class="form-group"><label>Высота в коньке H2 (м)</label><input type="number" id="trussH2" value="2.8" step="0.1" min="0.5" oninput="generateModel()"></div>
+        </div>
+        <div class="form-group">
+          <label>Число панелей фермы (четное)</label>
+          <input type="number" id="trussPanels" value="6" step="2" min="2" max="24" oninput="generateModel()">
+        </div>
+        <div class="row-2">
+          <div class="form-group"><label>Верхний пояс</label><select id="trussTopProf" onchange="generateModel()"></select></div>
+          <div class="form-group"><label>Нижний пояс</label><select id="trussBotProf" onchange="generateModel()"></select></div>
+        </div>
+        <div class="row-2">
+          <div class="form-group"><label>Раскосы фермы</label><select id="trussDiagProf" onchange="generateModel()"></select></div>
+          <div class="form-group"><label>Стойки фермы</label><select id="trussVertProf" onchange="generateModel()"></select></div>
+        </div>
+        <div class="checkbox-row" style="margin-top:4px;">
+          <input type="checkbox" id="hingeTrussEnds" checked onchange="generateModel()">
+          <label for="hingeTrussEnds">Шарнирное опирание ферм на колонны</label>
+        </div>
+        <div class="checkbox-row">
+          <input type="checkbox" id="hingeTrussWeb" checked onchange="generateModel()">
+          <label for="hingeTrussWeb">Шарниры в узлах решетки фермы</label>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 
-
-    <!-- 4. СВЯЗИ -->
-    <div class="section">
-      <h3>4. Связи (Крестовые X, шарнирные)</h3>
-      <div class="row">
-        <label>Шаг связевых блоков (вдоль Y):</label>
-        <input type="text" id="braceBaysY" value="1, 6, 11" title="Номера шагов по Y через запятую (например: 1, 6, 11)" onchange="updateModel()">
-      </div>
-      <label class="checkbox-row">
-        <input type="checkbox" id="hasVertBraces" checked onchange="updateModel()">
-        <span>Вертикальные связи по колоннам (по ярусам)</span>
-      </label>
-      <label class="checkbox-row">
-        <input type="checkbox" id="hasHorizBraces" checked onchange="updateModel()">
-        <span>Горизонтальные связи по нижнему поясу</span>
-      </label>
-      <div class="row" style="margin-top: 6px;">
-        <label>Сечение связей:</label>
-        <select id="secBrace" class="profile-select" data-default="Уголок гн. 70х5 (ГОСТ 19771)" onchange="updateModel()"></select>
-      </div>
+<div class="main-area">
+  <div class="canvas-container">
+    <canvas id="previewCanvas"></canvas>
+    <div class="canvas-overlay">
+      <b>3D Предпросмотр схемы</b><br>
+      ЛКМ + тянуть — вращение | Колесико — масштаб | <a href="#" style="color:#60a5fa; pointer-events:auto;" onclick="resetCamera(); return false;">Сброс вида</a>
     </div>
-
-    <button class="btn" onclick="downloadLiraFile()">💾 Скачать файл для ЛИРА-САПР (.txt)</button>
+    <div class="legend">
+      <div class="legend-item"><div class="dot" style="background:#3b82f6;"></div>Колонны</div>
+      <div class="legend-item"><div class="dot" style="background:#14b8a6;"></div>Распорки Y</div>
+      <div class="legend-item"><div class="dot" style="background:#f97316;"></div>Распорки X</div>
+      <div class="legend-item"><div class="dot" style="background:#22c55e;"></div>Фермы</div>
+      <div class="legend-item"><div class="dot" style="background:#eab308;"></div>Связи</div>
+      <div class="legend-item"><div class="dot" style="background:#ef4444;"></div>Опоры</div>
+    </div>
   </div>
 
-  <!-- ПРАВАЯ ЧАСТЬ: 3D ПРЕДПРОСМОТР И ТЕКСТОВЫЙ ФАЙЛ -->
-  <div class="workspace">
-    <div class="canvas-container" id="canvasBox">
-      <div class="canvas-toolbar">
-        <button id="btnViewIso" class="active" onclick="setView('iso')">3D Изометрия</button>
-        <button id="btnViewFront" onclick="setView('front')">Фасад (X-Z)</button>
-        <button id="btnViewSide" onclick="setView('side')">Торец (Y-Z)</button>
-        <button id="btnViewTop" onclick="setView('top')">План (X-Y)</button>
-        <button onclick="resetCamera()">Сброс</button>
-        <span style="border-left: 1px solid #ccc; height: 16px; margin: 0 4px;"></span>
-        <label style="font-size: 11px; display: flex; align-items: center; gap: 3px; cursor: pointer;">
-          <input type="checkbox" id="showNodes" onchange="draw()"> Узлы
-        </label>
-        <label style="font-size: 11px; display: flex; align-items: center; gap: 3px; cursor: pointer;">
-          <input type="checkbox" id="showElems" onchange="draw()"> Элементы
-        </label>
-      </div>
-      <canvas id="previewCanvas"></canvas>
-      <div class="canvas-info">
-        🖱️ ЛКМ: Вращение | Колесо: Масштаб | ПКМ: Сдвиг | 🔵 Колонны 🟢 Пояса 🟠 Решетка 🟣 Связи
+  <div class="output-panel">
+    <div class="output-header">
+      <span style="font-weight:600; color:#e2e8f0;">Текстовый файл модели ЛИРА-САПР 2024 R2.3 (Признак схемы 5)</span>
+      <div style="display:flex; gap:8px;">
+        <button class="btn-primary" id="copyBtn" onclick="copyText()">📋 Копировать текст</button>
+        <button class="btn-success" onclick="downloadTxt()">💾 Скачать .txt для ЛИРЫ</button>
       </div>
     </div>
-
-    <div class="output-box">
-      <div class="output-header">
-        <span>Предпросмотр файла задачи ЛИРА-САПР 2024 (UTF-8 / Кириллица / Сортаменты):</span>
-        <button onclick="copyToClipboard()" style="font-size: 11px; padding: 3px 8px; cursor: pointer;">📋 Копировать текст</button>
-      </div>
-      <textarea id="liraOutput" readonly></textarea>
-    </div>
+    <textarea id="liraOutput" readonly spellcheck="false"></textarea>
   </div>
 </div>
 
-<script src="app.js"></script>
+<script src="App.js"></script>
 </body>
 </html>
